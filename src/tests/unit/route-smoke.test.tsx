@@ -288,7 +288,6 @@ describe('route smoke coverage', () => {
         theme: 'dark',
         language: 'en',
         auto_startup: false,
-        error_reporting_enabled: false,
         proxy: {
           enabled: false,
           auto_start: false,

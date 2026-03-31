@@ -8,7 +8,6 @@ import type {
 const SERVICE_LABELS: Record<ServiceHealthId, string> = {
   config: 'Config',
   security: 'Credential Storage',
-  monitoring: 'Monitoring',
   updater: 'Updater',
   auth_server: 'Google Auth',
   proxy_server: 'API Proxy',

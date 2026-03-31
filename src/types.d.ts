@@ -6,11 +6,11 @@
 declare global {
   const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
   const MAIN_WINDOW_VITE_NAME: string;
-  const __SENTRY_DSN__: string | undefined;
   const __APPLYRON_E2E__: boolean;
 
-  interface BootstrapFlags {
-    sentryEnabled: boolean;
+  interface GlobalThis {
+    __APPLYRON_GOOGLE_CLIENT_ID__?: string;
+    __APPLYRON_GOOGLE_CLIENT_SECRET__?: string;
   }
 
   interface OrpcClientPortBridge {
@@ -20,7 +20,6 @@ declare global {
   }
 
   interface ElectronBridge {
-    getBootstrapFlags: () => Promise<BootstrapFlags>;
     startOrpcServer: () => void;
     getOrpcClientPort: () => OrpcClientPortBridge;
     onGoogleAuthCode: (callback: (code: string) => void) => () => void;

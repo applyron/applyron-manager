@@ -42,7 +42,6 @@ export const DashboardAnnouncementFeedSchema = z.object({
 export const SERVICE_HEALTH_IDS = [
   'config',
   'security',
-  'monitoring',
   'updater',
   'auth_server',
   'proxy_server',

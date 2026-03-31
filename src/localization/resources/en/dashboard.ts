@@ -79,7 +79,7 @@ export const enDashboard = {
     },
     health: {
       kicker: 'System Health',
-      description: 'Live service state for config, auth, proxy, monitors, and transport.',
+      description: 'Live service state for config, auth, proxy, update, and transport layers.',
       lastUpdated: 'Updated',
       states: {
         idle: 'Idle',
@@ -92,7 +92,6 @@ export const enDashboard = {
       services: {
         config: 'Config',
         security: 'Credential Storage',
-        monitoring: 'Monitoring',
         updater: 'Updater',
         auth_server: 'Google Auth',
         proxy_server: 'API Proxy',

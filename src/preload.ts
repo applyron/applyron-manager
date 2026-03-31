@@ -117,7 +117,6 @@ function attachCloudAccountsFailureStub(port: MessagePort) {
 }
 
 const electronBridge: ElectronBridge = {
-  getBootstrapFlags: () => ipcRenderer.invoke(IPC_CHANNELS.GET_BOOTSTRAP_FLAGS),
   startOrpcServer: () => {
     const channel = new MessageChannel();
     const serverPort = channel.port1;

@@ -69,20 +69,6 @@ export const trCommon = {
       clearData: 'Sorun devam ederse yerel hesap verilerini temizleyip tekrar oturum açın.',
     },
   },
-  consent: {
-    eyebrow: 'Gizlilik Kurulumu',
-    title: 'Anonim hata raporlarını açıp açmayacağınızı seçin',
-    description:
-      'Applyron Manager siz karar verene kadar anonim hata raporlamayı kapalı tutar. Bu tercihi daha sonra Ayarlar içinden değiştirebilirsiniz.',
-    enableTitle: 'Anonim hata raporlarını aç',
-    enableDescription:
-      'Kişisel içerik göndermeden çökme ve açılış hatalarını paylaşın; üretim sorunlarını daha hızlı düzeltebilelim.',
-    disableTitle: 'Hata raporlamayı kapalı tut',
-    disableDescription:
-      'Uygulama normal çalışmaya devam eder ancak anonim çökme raporu gönderilmez.',
-    footer: 'İsterseniz pencereyi kapatabilirsiniz. Bir seçim kaydedilmeden ana uygulama açılmaz.',
-    saving: 'Kaydediliyor',
-  },
   nav: {
     dashboard: 'Dashboard',
     accounts: 'Hesaplar',

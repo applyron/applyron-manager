@@ -22,13 +22,6 @@ interface LogEntry {
   formatted: string;
 }
 
-type SentryReporter = (payload: {
-  level: LogLevel;
-  message: string;
-  error?: Error;
-  logs: LogEntry[];
-}) => void;
-
 function sanitizeLogText(value: string): string {
   const sanitized = sanitizeObject(value);
   const baseText =
@@ -62,8 +55,6 @@ function stringifyLogArg(value: unknown): string {
 class Logger {
   private winstonLogger: winston.Logger;
   private recentLogs: LogEntry[] = [];
-  private sentryReporter: SentryReporter | null = null;
-  private sentryEnabled = false;
 
   constructor() {
     const agentDir = getAgentDir();
@@ -131,23 +122,6 @@ class Logger {
     }
   }
 
-  private extractError(args: unknown[]): Error | undefined {
-    for (const arg of args) {
-      if (arg instanceof Error) {
-        return arg;
-      }
-    }
-    return undefined;
-  }
-
-  setSentryReporter(reporter: SentryReporter | null) {
-    this.sentryReporter = reporter;
-  }
-
-  setErrorReportingEnabled(enabled: boolean) {
-    this.sentryEnabled = enabled;
-  }
-
   private formatArgs(args: unknown[]): string {
     return args.map((arg) => stringifyLogArg(arg)).join(' ');
   }
@@ -172,15 +146,6 @@ class Logger {
       level,
       message: mergedMessage,
     });
-
-    if (level === 'error' && this.sentryEnabled && this.sentryReporter) {
-      this.sentryReporter({
-        level,
-        message: mergedMessage,
-        error: this.extractError(args),
-        logs: [...this.recentLogs],
-      });
-    }
   }
 
   info(message: string, ...args: unknown[]) {

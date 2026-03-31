@@ -68,21 +68,6 @@ export const enCommon = {
       clearData: 'If the issue persists, clear local account data and sign in again.',
     },
   },
-  consent: {
-    eyebrow: 'Privacy Setup',
-    title: 'Choose whether to enable anonymous error reports',
-    description:
-      'Applyron Manager keeps anonymous error reporting disabled until you make a decision. You can change this later from Settings.',
-    enableTitle: 'Enable anonymous error reports',
-    enableDescription:
-      'Share crash and startup failures without personal content so we can fix production issues faster.',
-    disableTitle: 'Keep error reporting off',
-    disableDescription:
-      'The app will continue to work normally, but no anonymous crash reports will be sent.',
-    footer:
-      'You can close the window instead. The main application remains blocked until a choice is saved.',
-    saving: 'Saving',
-  },
   nav: {
     dashboard: 'Dashboard',
     accounts: 'Accounts',

@@ -79,7 +79,7 @@ export const trDashboard = {
     health: {
       kicker: 'Sistem Sağlığı',
       description:
-        'Yapılandırma, auth, proxy, monitörler ve taşıma katmanı için canlı servis durumu.',
+        'Yapılandırma, auth, proxy, güncelleme ve taşıma katmanı için canlı servis durumu.',
       lastUpdated: 'Güncellendi',
       states: {
         idle: 'Beklemede',
@@ -92,7 +92,6 @@ export const trDashboard = {
       services: {
         config: 'Yapılandırma',
         security: 'Kimlik Depolama',
-        monitoring: 'İzleme',
         updater: 'Güncelleyici',
         auth_server: 'Google Giriş',
         proxy_server: 'API Proxy',

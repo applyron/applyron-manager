@@ -23,9 +23,7 @@ vi.mock('../../utils/autoStart', () => ({
 }));
 
 vi.mock('../../utils/logger', () => ({
-  logger: {
-    setErrorReportingEnabled: vi.fn(),
-  },
+  logger: {},
 }));
 
 vi.mock('../../server/server-config', () => ({

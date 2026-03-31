@@ -1,4 +1,3 @@
-import './instrument'; // MUST be the first import to ensure Sentry initializes before app ready
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import type { MessageBoxOptions } from 'electron';
 import { spawn } from 'child_process';
@@ -45,7 +44,6 @@ import {
   StartupFatalError,
 } from './main/startupLifecycle';
 import { prepareStartupDesktopIntegration } from './main/startupDesktopIntegration';
-import { isErrorReportingEnabled } from './utils/errorReporting';
 import {
   ensureVisibleWindowsUninstallLauncher,
   triggerWindowsUninstallFromLauncher,
@@ -104,13 +102,6 @@ ipcMain.on(IPC_CHANNELS.CHANGE_LANGUAGE, (event, lang) => {
   logger.info(`IPC: Received CHANGE_LANGUAGE: ${lang}`);
   setTrayLanguage(lang);
 });
-ipcMain.handle(IPC_CHANNELS.GET_BOOTSTRAP_FLAGS, () => {
-  const config = startupConfig ?? ConfigManager.getCachedConfig() ?? ConfigManager.loadConfig();
-  return {
-    sentryEnabled: isErrorReportingEnabled(config) && Boolean(process.env.SENTRY_DSN),
-  };
-});
-
 app.disableHardwareAcceleration();
 
 triggerWindowsUninstallFromLauncher({

@@ -132,14 +132,6 @@ export const enSettings = {
       macos_hint:
         'macOS requires a signed app for Login Items to work. If auto-start fails, please sign the app or enable it manually in System Settings.',
     },
-    privacy: {
-      title: 'Privacy',
-      description: 'Anonymous error reporting stays disabled until you explicitly opt in.',
-      error_reporting: 'Error Reporting',
-      error_reporting_desc:
-        'Send anonymous crash and startup diagnostics without personal content. This preference is collected once at first launch and can be changed here later.',
-      restart_note: 'Changes to error reporting will take effect after restarting the application.',
-    },
     shortcuts: {
       title: 'Keyboard Shortcuts',
       description: 'Core navigation and operator shortcuts available across the app.',

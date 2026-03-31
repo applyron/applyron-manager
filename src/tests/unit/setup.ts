@@ -32,7 +32,6 @@ if (typeof window === 'undefined') {
 }
 
 const defaultElectronBridge: ElectronBridge = {
-  getBootstrapFlags: vi.fn(async () => ({ sentryEnabled: false })),
   startOrpcServer: vi.fn(),
   getOrpcClientPort: vi.fn(() => ({
     postMessage: vi.fn(),

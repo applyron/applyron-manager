@@ -55,7 +55,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate Google OAuth configuration for packaged builds
+        shell: bash
+        env:
+          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
+          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
+        run: |
+          : "${APPLYRON_GOOGLE_CLIENT_ID:?Missing repository secret APPLYRON_GOOGLE_CLIENT_ID}"
+          : "${APPLYRON_GOOGLE_CLIENT_SECRET:?Missing repository secret APPLYRON_GOOGLE_CLIENT_SECRET}"
+
       - name: Package packaged E2E app
+        env:
+          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
+          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
         run: npm run package:e2e
 
       - name: Run packaged Electron smoke tests
@@ -226,6 +238,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate Google OAuth configuration for release builds
+        shell: bash
+        env:
+          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
+          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
+        run: |
+          : "${APPLYRON_GOOGLE_CLIENT_ID:?Missing repository secret APPLYRON_GOOGLE_CLIENT_ID}"
+          : "${APPLYRON_GOOGLE_CLIENT_SECRET:?Missing repository secret APPLYRON_GOOGLE_CLIENT_SECRET}"
+
       - name: Validate dashboard announcements feed source
         run: |
           node scripts/validate-announcements.mjs
@@ -237,10 +258,8 @@ jobs:
         if: matrix.platform != 'darwin'
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
+          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
         run: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
 
       - name: Make Artifacts (darwin with retry)
@@ -253,10 +272,8 @@ jobs:
           command: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
+          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
 
       - name: Prepare static update bundle
         if: matrix.platform != 'linux'

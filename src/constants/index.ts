@@ -6,5 +6,4 @@ export const LOCAL_STORAGE_KEYS = {
 export const IPC_CHANNELS = {
   START_ORPC_SERVER: 'start-orpc-server',
   CHANGE_LANGUAGE: 'change-language',
-  GET_BOOTSTRAP_FLAGS: 'get-bootstrap-flags',
 };

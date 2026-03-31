@@ -379,46 +379,6 @@ export function SettingsPage() {
               ))}
             </CardContent>
           </Card>
-
-          {/* Privacy & Error Reporting Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('settings.privacy.title', 'Privacy')}</CardTitle>
-              <CardDescription>
-                {t(
-                  'settings.privacy.description',
-                  'Anonymous error reporting stays disabled until you explicitly opt in.',
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border p-4">
-                <div className="space-y-1">
-                  <Label>{t('settings.privacy.error_reporting', 'Error Reporting')}</Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t(
-                      'settings.privacy.error_reporting_desc',
-                      'Send anonymous crash and startup diagnostics without personal content. This preference is collected once at first launch and can be changed here later.',
-                    )}
-                  </p>
-                </div>
-                <Switch
-                  checked={config?.error_reporting_enabled || false}
-                  onCheckedChange={async (checked) => {
-                    if (config) {
-                      await saveConfig({ ...config, error_reporting_enabled: checked });
-                    }
-                  }}
-                />
-              </div>
-              <p className="text-muted-foreground text-xs">
-                {t(
-                  'settings.privacy.restart_note',
-                  'Changes to error reporting will take effect after restarting the application.',
-                )}
-              </p>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         {/* --- MODELS TAB --- */}

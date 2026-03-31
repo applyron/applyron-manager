@@ -52,8 +52,6 @@ export const AppConfigSchema = z.object({
   theme: z.string(),
   managed_ide_target: z.enum(['antigravity', 'vscode-codex']).default('antigravity'),
   auto_startup: z.boolean(),
-  error_reporting_enabled: z.boolean(),
-  privacy_consent_asked: z.boolean().optional().default(false), // Optional for backward compatibility
   default_export_path: z.string().nullable().optional(), // Export path
   model_visibility: z.record(z.string(), z.boolean()).default({}), // Model visibility preferences
   provider_groupings_enabled: z.boolean().default(false), // Enable provider groupings UI
@@ -71,8 +69,6 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   theme: 'system',
   managed_ide_target: 'antigravity',
   auto_startup: false,
-  error_reporting_enabled: false,
-  privacy_consent_asked: false, // Whether the user has been asked for consent
   default_export_path: null,
   model_visibility: {}, // Model visibility preferences
   provider_groupings_enabled: false, // Enable provider groupings UI

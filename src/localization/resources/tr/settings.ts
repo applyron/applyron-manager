@@ -133,15 +133,6 @@ export const trSettings = {
       macos_hint:
         'macOS, Giriş Öğeleri için imzalı bir uygulama gerektirir. Otomatik başlangıç çalışmazsa uygulamayı imzalayın veya Sistem Ayarları içinden elle etkinleştirin.',
     },
-    privacy: {
-      title: 'Gizlilik',
-      description: 'Anonim hata raporlama siz açıkça izin verene kadar kapalı kalır.',
-      error_reporting: 'Hata Raporlama',
-      error_reporting_desc:
-        'Kişisel içerik olmadan anonim çökme ve açılış tanı bilgileri gönderin. Bu tercih ilk açılışta sorulur ve daha sonra buradan değiştirilebilir.',
-      restart_note:
-        'Hata raporlama değişiklikleri uygulama yeniden başlatıldıktan sonra etkinleşir.',
-    },
     shortcuts: {
       title: 'Klavye Kısayolları',
       description: 'Uygulama genelinde kullanılabilen temel gezinme ve operatör kısayolları.',
