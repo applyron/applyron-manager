@@ -1,0 +1,59 @@
+name: Release
+
+# Manual-only release orchestration.
+# CI still runs on push, but semantic-release is invoked explicitly when the
+# branch is in a known-good state to avoid version churn during pipeline fixes.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for semantic-release to analyze commits
+          token: ${{ secrets.GH_TOKEN || github.token }}
+
+      - name: Warn when GH_TOKEN is not configured
+        env:
+          GH_TOKEN_SECRET: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN_SECRET" ]; then
+            echo "::warning::GH_TOKEN is not configured. Falling back to the repository GITHUB_TOKEN for semantic-release."
+            echo "::warning::If you need release-created workflows to fan out via GitHub events, configure GH_TOKEN as a classic PAT with repo/workflow access."
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure authenticated git remote
+        env:
+          RELEASE_AUTH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+        run: |
+          echo "::add-mask::$RELEASE_AUTH_TOKEN"
+          git remote set-url origin "https://x-access-token:${RELEASE_AUTH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+        run: npx semantic-release

@@ -1,0 +1,11 @@
+{
+  "contains": [
+    "\"reasoning_content\":\"Need to inspect the image.\"",
+    "\"content\":\"The scene shows a sunny skyline.\"",
+    "\"name\":\"lookup_weather\"",
+    "\"id\":\"call_9\"",
+    "data:image/png;base64,QUJDRA==",
+    "\"finish_reason\":\"stop\"",
+    "data: [DONE]"
+  ]
+}

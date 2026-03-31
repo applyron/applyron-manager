@@ -1,0 +1,59 @@
+{
+  "model": "gpt-4.1-mini",
+  "system": "You are a careful assistant.",
+  "temperature": 0.2,
+  "max_tokens": 512,
+  "tools": [
+    {
+      "name": "get_weather"
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Weather for Istanbul please."
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "QUJDRA=="
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Checking the forecast."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_weather_1",
+          "name": "get_weather",
+          "input": {
+            "city": "Istanbul",
+            "unit": "c"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_weather_1",
+          "content": "18C and sunny",
+          "is_error": false
+        }
+      ]
+    }
+  ]
+}

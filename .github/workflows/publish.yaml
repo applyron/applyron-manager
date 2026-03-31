@@ -1,0 +1,450 @@
+name: Publish Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build artifacts only, skip uploading to GitHub Release'
+        required: false
+        type: boolean
+        default: true
+      allow_update_published_release:
+        description: 'Allow uploading assets to an already published release'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || github.ref || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: windows-11-arm
+            platform: win32
+            arch: arm64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-14
+            platform: darwin
+            arch: arm64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout git repo
+        uses: actions/checkout@v4
+
+      - name: Install Node and NPM
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot rpm libsecret-1-dev pkg-config
+
+      - name: Ensure WiX Toolset
+        if: matrix.platform == 'win32' && matrix.arch == 'x64'
+        shell: powershell
+        run: |
+          $installed = choco list --local-only wixtoolset --exact --limit-output
+          if (-not $installed) {
+            choco install wixtoolset --version=3.14.0 -y
+          } elseif ($installed -match '^wixtoolset\|3\.14(\.|$)') {
+            Write-Host "WiX Toolset already compatible: $installed"
+          } else {
+            Write-Host "Incompatible WiX Toolset detected: $installed"
+            choco upgrade wixtoolset --version=3.14.0 --allow-downgrade -y
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate dashboard announcements feed source
+        run: |
+          node scripts/validate-announcements.mjs
+
+      - name: Install release toolchain
+        run: npm run install:release-tools -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+
+      - name: Make Artifacts
+        if: matrix.platform != 'darwin'
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+
+      # DMG creation may be flaky on GitHub macOS runners, so retry the full darwin make.
+      - name: Make Artifacts (darwin with retry)
+        if: matrix.platform == 'darwin'
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 20
+          retry_wait_seconds: 20
+          command: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            out/make/**/*.exe
+            out/make/**/*.nupkg
+            out/make/**/*.dmg
+            out/make/**/*.zip
+            out/make/**/*.AppImage
+            out/make/**/*.deb
+            out/make/**/*.rpm
+            out/make/**/*.msi
+            out/make/**/RELEASES*
+            out/make/**/*.yml
+            out/make/**/*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Dry-run summary
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: |
+          echo "Dry run enabled: build artifacts generated and uploaded; release publish step will be skipped."
+
+  packaged-smoke:
+    name: Packaged Smoke (${{ matrix.platform }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-14
+            platform: darwin
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout git repo
+        uses: actions/checkout@v4
+
+      - name: Install Node and NPM
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package packaged E2E app
+        run: npm run package:e2e
+
+      - name: Run packaged Electron smoke tests
+        run: npm run test:e2e:packaged
+
+      - name: Upload packaged smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-smoke-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            out/e2e/**
+            test-results/**
+            playwright-report/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish:
+    name: Publish Release (Manual Approval)
+    needs: [build, packaged-smoke]
+    runs-on: ubuntu-latest
+    if: needs.build.result == 'success' && needs.packaged-smoke.result == 'success' && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
+    permissions:
+      contents: write
+    # Configure the `release` environment with required reviewers in GitHub settings
+    # to enforce a manual approval gate before assets are uploaded.
+    environment:
+      name: release
+
+    steps:
+      - name: Checkout git repo
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: make-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Install Node and NPM
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Prepare static update bundle
+        run: node scripts/prepare-static-update-assets.mjs release-assets release-assets-static
+
+      - name: Configure SSH for update server
+        env:
+          UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_SSH_PRIVATE_KEY: ${{ secrets.UPDATE_SERVER_SSH_PRIVATE_KEY }}
+        run: |
+          : "${UPDATE_SERVER_HOST:?Missing repository variable UPDATE_SERVER_HOST}"
+          : "${UPDATE_SERVER_SSH_PRIVATE_KEY:?Missing repository secret UPDATE_SERVER_SSH_PRIVATE_KEY}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$UPDATE_SERVER_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t rsa,ecdsa,ed25519 -H "$UPDATE_SERVER_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload Windows update bundle to server
+        env:
+          UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_PORT: ${{ vars.UPDATE_SERVER_PORT }}
+          UPDATE_SERVER_USER: ${{ vars.UPDATE_SERVER_USER }}
+          UPDATE_SERVER_PATH: ${{ vars.UPDATE_SERVER_PATH }}
+        run: |
+          : "${UPDATE_SERVER_HOST:?Missing repository variable UPDATE_SERVER_HOST}"
+          : "${UPDATE_SERVER_USER:?Missing repository variable UPDATE_SERVER_USER}"
+          : "${UPDATE_SERVER_PATH:?Missing repository variable UPDATE_SERVER_PATH}"
+
+          port="${UPDATE_SERVER_PORT:-22}"
+          ssh -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "mkdir -p '$UPDATE_SERVER_PATH'"
+          rsync -av --delete --chmod=D755,F644 -e "ssh -p $port" \
+            release-assets-static/ \
+            "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST:$UPDATE_SERVER_PATH/"
+
+      - name: Upload dashboard announcements feed to server
+        env:
+          UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_PORT: ${{ vars.UPDATE_SERVER_PORT }}
+          UPDATE_SERVER_USER: ${{ vars.UPDATE_SERVER_USER }}
+          UPDATE_SERVER_PATH: ${{ vars.UPDATE_SERVER_PATH }}
+        run: |
+          : "${UPDATE_SERVER_HOST:?Missing repository variable UPDATE_SERVER_HOST}"
+          : "${UPDATE_SERVER_USER:?Missing repository variable UPDATE_SERVER_USER}"
+          : "${UPDATE_SERVER_PATH:?Missing repository variable UPDATE_SERVER_PATH}"
+
+          if [ ! -f deploy/announcements.json ]; then
+            echo "::error::deploy/announcements.json was not found"
+            exit 1
+          fi
+
+          port="${UPDATE_SERVER_PORT:-22}"
+          rsync -av --chmod=F644 -e "ssh -p $port" \
+            deploy/announcements.json \
+            "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST:$UPDATE_SERVER_PATH/announcements.json"
+
+      - name: Smoke test uploaded static update bundle and announcements feed
+        env:
+          UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
+          UPDATE_SERVER_PORT: ${{ vars.UPDATE_SERVER_PORT }}
+          UPDATE_SERVER_USER: ${{ vars.UPDATE_SERVER_USER }}
+          UPDATE_SERVER_PATH: ${{ vars.UPDATE_SERVER_PATH }}
+          UPDATE_SERVER_PUBLIC_BASE_URL: ${{ vars.UPDATE_SERVER_PUBLIC_BASE_URL }}
+        run: |
+          : "${UPDATE_SERVER_HOST:?Missing repository variable UPDATE_SERVER_HOST}"
+          : "${UPDATE_SERVER_USER:?Missing repository variable UPDATE_SERVER_USER}"
+          : "${UPDATE_SERVER_PATH:?Missing repository variable UPDATE_SERVER_PATH}"
+
+          port="${UPDATE_SERVER_PORT:-22}"
+          public_base_url="${UPDATE_SERVER_PUBLIC_BASE_URL:-https://${UPDATE_SERVER_HOST}/applyron-manager}"
+
+          ssh -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "test -f '$UPDATE_SERVER_PATH/announcements.json'"
+          curl -fsS "${public_base_url}/announcements.json" -o /dev/null
+
+          mapfile -t arch_dirs < <(find release-assets-static/win32 -mindepth 1 -maxdepth 1 -type d | sort)
+
+          if [ "${#arch_dirs[@]}" -eq 0 ]; then
+            echo "::error::No Windows update artifact directories found under release-assets-static/win32"
+            exit 1
+          fi
+
+          for arch_dir in "${arch_dirs[@]}"; do
+            arch="$(basename "$arch_dir")"
+            releases_file="$arch_dir/RELEASES"
+            nupkg_file="$(find "$arch_dir" -maxdepth 1 -type f -name '*.nupkg' | sort | head -n 1)"
+            latest_file="$(find "$arch_dir" -maxdepth 1 -type f -name '*.yml' | sort | head -n 1)"
+            setup_file="$(find "$arch_dir" -maxdepth 1 -type f -iname '*setup*.exe' | sort | head -n 1)"
+
+            if [ ! -f "$releases_file" ] || [ -z "$nupkg_file" ]; then
+              echo "::error::Missing required Windows update files for arch ${arch}"
+              exit 1
+            fi
+
+            nupkg_name="$(basename "$nupkg_file")"
+            remote_arch_path="$UPDATE_SERVER_PATH/win32/$arch"
+
+            remote_checks=(
+              "test -f '$remote_arch_path/RELEASES'"
+              "test -f '$remote_arch_path/$nupkg_name'"
+            )
+
+            if [ -n "$latest_file" ]; then
+              latest_name="$(basename "$latest_file")"
+              remote_checks+=("test -f '$remote_arch_path/$latest_name'")
+            fi
+
+            if [ -n "$setup_file" ]; then
+              setup_name="$(basename "$setup_file")"
+              remote_checks+=("test -f '$remote_arch_path/$setup_name'")
+            fi
+
+            remote_check_command="${remote_checks[0]}"
+            for remote_check in "${remote_checks[@]:1}"; do
+              remote_check_command="${remote_check_command} && ${remote_check}"
+            done
+            ssh -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "$remote_check_command"
+
+            curl -fsS "${public_base_url}/win32/${arch}/RELEASES" -o /dev/null
+            curl -fsS "${public_base_url}/win32/${arch}/${nupkg_name}" -o /dev/null
+
+            if [ -n "$latest_file" ]; then
+              latest_name="$(basename "$latest_file")"
+              curl -fsS "${public_base_url}/win32/${arch}/${latest_name}" -o /dev/null
+            fi
+          done
+
+          mapfile -t mac_arch_dirs < <(find release-assets-static/darwin -mindepth 1 -maxdepth 1 -type d | sort)
+
+          if [ "${#mac_arch_dirs[@]}" -eq 0 ]; then
+            echo "::error::No macOS update artifact directories found under release-assets-static/darwin"
+            exit 1
+          fi
+
+          for arch_dir in "${mac_arch_dirs[@]}"; do
+            arch="$(basename "$arch_dir")"
+            releases_json="$arch_dir/RELEASES.json"
+            zip_file="$(find "$arch_dir" -maxdepth 1 -type f -name '*.zip' | sort | head -n 1)"
+            dmg_file="$(find "$arch_dir" -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
+
+            if [ ! -f "$releases_json" ] || [ -z "$zip_file" ]; then
+              echo "::error::Missing required macOS update files for arch ${arch}"
+              exit 1
+            fi
+
+            zip_name="$(basename "$zip_file")"
+            remote_arch_path="$UPDATE_SERVER_PATH/darwin/$arch"
+
+            remote_checks=(
+              "test -f '$remote_arch_path/RELEASES.json'"
+              "test -f '$remote_arch_path/$zip_name'"
+            )
+
+            if [ -n "$dmg_file" ]; then
+              dmg_name="$(basename "$dmg_file")"
+              remote_checks+=("test -f '$remote_arch_path/$dmg_name'")
+            fi
+
+            remote_check_command="${remote_checks[0]}"
+            for remote_check in "${remote_checks[@]:1}"; do
+              remote_check_command="${remote_check_command} && ${remote_check}"
+            done
+            ssh -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "$remote_check_command"
+
+            curl -fsS "${public_base_url}/darwin/${arch}/RELEASES.json" -o /dev/null
+            curl -fsS "${public_base_url}/darwin/${arch}/${zip_name}" -o /dev/null
+          done
+
+      - name: Resolve release tag
+        id: release_tag
+        env:
+          RELEASE_EVENT_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+        run: |
+          if [ -n "$RELEASE_EVENT_TAG" ]; then
+            tag="$RELEASE_EVENT_TAG"
+          else
+            version="$(node -e "const v=require('./package.json').version; if (!v) { throw new Error('package.json version is empty'); } process.stdout.write(v);")"
+            tag="v$version"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "::error::Resolved release tag is empty"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using release tag: $tag"
+
+      - name: Ensure release is safe to update
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          ALLOW_UPDATE_PUBLISHED_RELEASE: ${{ github.event_name == 'release' && 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.allow_update_published_release) || 'false' }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ] && [ "$ALLOW_UPDATE_PUBLISHED_RELEASE" != "true" ]; then
+              echo "::error::Release $RELEASE_TAG is already published. Refusing to upload assets."
+              echo "::error::Re-run with workflow_dispatch input allow_update_published_release=true if you explicitly want to update it."
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --draft --notes "Automated release draft."
+          fi
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          # Updater feed files (.nupkg, .zip, .yml, checksums) are published to the
+          # static update server below; keep GitHub Release assets limited to
+          # user-facing installers and packages.
+          mapfile -t files < <(find release-assets -type f \( \
+            -name '*.exe' -o \
+            -name '*.dmg' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' -o \
+            -name '*.msi' \
+          \) | sort)
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No release assets found under release-assets/"
+            exit 1
+          fi
+
+          printf 'Uploading %s assets to %s\n' "${#files[@]}" "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber

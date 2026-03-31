@@ -1,0 +1,36 @@
+{
+  "model": "gpt-4.1-mini",
+  "upstream": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "thought": true,
+              "text": "Need to inspect the image."
+            },
+            {
+              "text": "The scene shows a sunny skyline."
+            },
+            {
+              "functionCall": {
+                "id": "call_9",
+                "name": "lookup_weather",
+                "args": {
+                  "city": "Istanbul"
+                }
+              }
+            },
+            {
+              "inlineData": {
+                "mimeType": "image/png",
+                "data": "QUJDRA=="
+              }
+            }
+          ]
+        },
+        "finishReason": "STOP"
+      }
+    ]
+  }
+}

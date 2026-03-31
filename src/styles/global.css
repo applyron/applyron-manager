@@ -1,0 +1,287 @@
+@import 'tailwindcss';
+
+@plugin 'tailwindcss-animate';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --font-sans: Geist, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+  --font-display: Tomorrow, sans-serif;
+  --radius-xl: calc(var(--radius) + 0.5rem);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}
+
+@layer base {
+  @font-face {
+    font-family: 'Geist';
+    font-display: swap;
+    src: url('../assets/fonts/geist/geist.ttf') format('truetype');
+  }
+
+  @font-face {
+    font-family: 'Geist Mono';
+    font-display: swap;
+    src: url('../assets/fonts/geist-mono/geist-mono.ttf') format('truetype');
+  }
+
+  @font-face {
+    font-family: 'Tomorrow';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('../assets/fonts/tomorrow/tomorrow-regular.ttf') format('truetype');
+  }
+
+  @font-face {
+    font-family: 'Tomorrow';
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+    src: url('../assets/fonts/tomorrow/tomorrow-italic.ttf') format('truetype');
+  }
+
+  @font-face {
+    font-family: 'Tomorrow';
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+    src: url('../assets/fonts/tomorrow/tomorrow-bold.ttf') format('truetype');
+  }
+
+  @font-face {
+    font-family: 'Tomorrow';
+    font-weight: 700;
+    font-style: italic;
+    font-display: swap;
+    src: url('../assets/fonts/tomorrow/tomorrow-bold-italic.ttf') format('truetype');
+  }
+
+  :root {
+    color-scheme: light;
+    --background: 42 29% 96%;
+    --foreground: 224 29% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 29% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 29% 14%;
+    --primary: 146 81% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 198 88% 43%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 40 24% 91%;
+    --muted-foreground: 221 11% 42%;
+    --accent: 150 22% 90%;
+    --accent-foreground: 224 29% 14%;
+    --destructive: 10 80% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 18% 82%;
+    --input: 214 18% 86%;
+    --ring: 146 81% 39%;
+    --radius: 0.5rem;
+
+    --hud-shell: rgba(250, 248, 242, 0.84);
+    --hud-panel: rgba(255, 255, 255, 0.88);
+    --hud-panel-alt: rgba(245, 241, 233, 0.94);
+    --hud-panel-elevated: rgba(255, 255, 255, 0.96);
+    --hud-panel-floating: rgba(255, 255, 255, 0.98);
+    --hud-input-bg: rgba(255, 255, 255, 0.92);
+    --hud-code-bg: rgba(238, 233, 225, 0.92);
+    --hud-surface-hover: rgba(240, 236, 228, 0.82);
+    --hud-border-soft: rgba(93, 104, 122, 0.16);
+    --hud-border-strong: rgba(93, 104, 122, 0.3);
+    --hud-text-subtle: #6a7382;
+    --hud-text-strong: hsl(var(--foreground));
+    --hud-success: #55fe7e;
+    --hud-success-strong: #04d259;
+    --hud-success-contrast: #003e15;
+    --hud-warning: #f5c542;
+    --hud-danger: #ff7351;
+    --hud-info: #2d7dff;
+    --hud-neutral: #767577;
+    --hud-success-soft-bg: rgba(33, 177, 93, 0.1);
+    --hud-success-soft-border: rgba(33, 177, 93, 0.22);
+    --hud-info-soft-bg: rgba(0, 172, 255, 0.1);
+    --hud-info-soft-border: rgba(0, 172, 255, 0.2);
+    --hud-warning-soft-bg: rgba(245, 197, 66, 0.12);
+    --hud-warning-soft-border: rgba(245, 197, 66, 0.24);
+    --hud-danger-soft-bg: rgba(255, 115, 81, 0.1);
+    --hud-danger-soft-border: rgba(255, 115, 81, 0.22);
+    --hud-neutral-soft-bg: rgba(106, 115, 130, 0.1);
+    --hud-neutral-soft-border: rgba(106, 115, 130, 0.18);
+    --hud-shadow: 0 24px 64px rgba(120, 131, 148, 0.16);
+    --hud-sidebar-shadow: 0 18px 48px rgba(120, 131, 148, 0.14);
+    --hud-glow:
+      radial-gradient(circle at top, rgba(33, 177, 93, 0.18), transparent 38%),
+      radial-gradient(circle at bottom right, rgba(0, 172, 255, 0.12), transparent 34%);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 240 8% 7%;
+    --foreground: 320 18% 96%;
+    --card: 240 9% 10%;
+    --card-foreground: 320 18% 96%;
+    --popover: 240 10% 10%;
+    --popover-foreground: 320 18% 96%;
+    --primary: 134 99% 66%;
+    --primary-foreground: 140 100% 12%;
+    --secondary: 194 94% 77%;
+    --secondary-foreground: 196 100% 12%;
+    --muted: 240 5% 10%;
+    --muted-foreground: 240 2% 61%;
+    --accent: 240 6% 16%;
+    --accent-foreground: 320 18% 96%;
+    --destructive: 14 100% 66%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 2% 29%;
+    --input: 240 4% 17%;
+    --ring: 134 99% 66%;
+
+    --hud-shell: rgba(10, 12, 14, 0.84);
+    --hud-panel: rgba(19, 19, 21, 0.88);
+    --hud-panel-alt: rgba(14, 14, 16, 0.94);
+    --hud-panel-elevated: rgba(31, 31, 34, 0.94);
+    --hud-panel-floating: rgba(19, 19, 21, 0.98);
+    --hud-input-bg: rgba(14, 14, 16, 0.95);
+    --hud-code-bg: rgba(14, 14, 16, 0.96);
+    --hud-surface-hover: rgba(31, 31, 34, 0.88);
+    --hud-border-soft: rgba(72, 71, 74, 0.22);
+    --hud-border-strong: rgba(85, 254, 126, 0.24);
+    --hud-text-subtle: #8d8a8e;
+    --hud-text-strong: hsl(var(--foreground));
+    --hud-success: #55fe7e;
+    --hud-success-strong: #04d259;
+    --hud-success-contrast: #003e15;
+    --hud-warning: #f5c542;
+    --hud-danger: #ff7351;
+    --hud-info: #8debff;
+    --hud-neutral: #767577;
+    --hud-success-soft-bg: rgba(85, 254, 126, 0.1);
+    --hud-success-soft-border: rgba(85, 254, 126, 0.24);
+    --hud-info-soft-bg: rgba(141, 235, 255, 0.1);
+    --hud-info-soft-border: rgba(141, 235, 255, 0.22);
+    --hud-warning-soft-bg: rgba(245, 197, 66, 0.12);
+    --hud-warning-soft-border: rgba(245, 197, 66, 0.24);
+    --hud-danger-soft-bg: rgba(255, 115, 81, 0.1);
+    --hud-danger-soft-border: rgba(255, 115, 81, 0.22);
+    --hud-neutral-soft-bg: rgba(118, 117, 119, 0.12);
+    --hud-neutral-soft-border: rgba(118, 117, 119, 0.2);
+    --hud-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+    --hud-sidebar-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+    --hud-glow:
+      radial-gradient(circle at top, rgba(85, 254, 126, 0.14), transparent 34%),
+      radial-gradient(circle at bottom right, rgba(141, 235, 255, 0.1), transparent 30%);
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground overflow-hidden;
+    font-family: Geist, 'Segoe UI', sans-serif;
+    background-image:
+      var(--hud-glow), linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+  }
+
+  .draglayer {
+    @apply bg-background;
+    -webkit-app-region: drag;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+}
+
+@layer utilities {
+  .glass-sidebar {
+    background: var(--hud-shell);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow: var(--hud-sidebar-shadow);
+  }
+
+  .glass-card {
+    background: var(--hud-panel);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--hud-border-soft);
+    box-shadow: var(--hud-shadow);
+  }
+
+  .gradient-primary {
+    background: linear-gradient(135deg, var(--hud-success), var(--hud-success-strong));
+  }
+
+  .hud-label {
+    color: var(--hud-text-subtle);
+    font-family: Tomorrow, sans-serif;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .hud-success-cta {
+    background: linear-gradient(135deg, var(--hud-success), var(--hud-success-strong));
+    color: var(--hud-success-contrast);
+  }
+
+  .cloud-account-card {
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-border-soft);
+  }
+
+  .cloud-account-card:hover {
+    background: var(--hud-panel-elevated);
+    border-color: var(--hud-border-strong);
+  }
+
+  .cloud-account-card[data-selected='true'] {
+    background: var(--hud-panel-elevated);
+    border-color: var(--hud-success-soft-border);
+    box-shadow: var(--hud-shadow);
+  }
+
+  .cloud-account-card[data-selected='true']:hover {
+    border-color: var(--hud-success-soft-border);
+  }
+}
