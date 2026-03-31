@@ -305,10 +305,8 @@ jobs:
 
           port="${UPDATE_SERVER_PORT:-22}"
           remote_subtree="$UPDATE_SERVER_PATH/${{ matrix.platform }}/${{ matrix.arch }}"
-          ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "mkdir -p '$remote_subtree'"
-          rsync -av --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -i \"$UPDATE_SERVER_SSH_KEY\" -o UserKnownHostsFile=\"$UPDATE_SERVER_KNOWN_HOSTS\" -o StrictHostKeyChecking=yes -p $port" \
-            "$local_subtree/" \
-            "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST:$remote_subtree/"
+          ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "mkdir -p '$remote_subtree' && find '$remote_subtree' -mindepth 1 -delete"
+          tar -C "$local_subtree" -cf - . | ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "tar -xf - -C '$remote_subtree' && find '$remote_subtree' -type d -exec chmod 755 {} + && find '$remote_subtree' -type f -exec chmod 644 {} +"
 
       - name: Upload assets to release
         if: env.SHOULD_PUBLISH == 'true'
