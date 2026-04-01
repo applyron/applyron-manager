@@ -371,6 +371,7 @@ function createWindowsMakers(targetArch: string): ForgeMaker[] {
   }>('@electron-forge/maker-squirrel', installCommand);
   const makers: ForgeMaker[] = [
     new loadedSquirrelModule.MakerSquirrel({
+      loadingGif: 'images/installer-splash.gif',
       setupIcon: 'images/icon.ico',
       iconUrl: `https://raw.githubusercontent.com/${githubRepository.owner}/${githubRepository.name}/main/images/icon.ico`,
     }),

@@ -33,6 +33,19 @@ npm install
 npm start
 ```
 
+If you want to test Google account sign-in locally, create `.env.local` from `.env.example` and provide your own OAuth credentials before starting the app:
+
+```bash
+cp .env.example .env.local
+```
+
+Required keys:
+
+- `APPLYRON_GOOGLE_CLIENT_ID`
+- `APPLYRON_GOOGLE_CLIENT_SECRET`
+
+Keep `.env.local` private. It is ignored by git and must never be committed.
+
 Common quality gates:
 
 ```bash

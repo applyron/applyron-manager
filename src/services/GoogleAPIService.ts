@@ -20,11 +20,6 @@ const URLS = {
 // Request timeout in milliseconds (30 seconds)
 const REQUEST_TIMEOUT_MS = 30000;
 
-type GoogleOAuthBuildGlobals = typeof globalThis & {
-  __APPLYRON_GOOGLE_CLIENT_ID__?: string;
-  __APPLYRON_GOOGLE_CLIENT_SECRET__?: string;
-};
-
 function normalizeGoogleOAuthCredential(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -33,10 +28,12 @@ function normalizeGoogleOAuthCredential(value: string | undefined): string | und
 function resolveEmbeddedGoogleOAuthCredentials():
   | { clientId: string; clientSecret: string }
   | undefined {
-  const buildGlobals = globalThis as GoogleOAuthBuildGlobals;
-  const clientId = normalizeGoogleOAuthCredential(buildGlobals.__APPLYRON_GOOGLE_CLIENT_ID__);
+  const clientId = normalizeGoogleOAuthCredential(
+    (globalThis as { __APPLYRON_GOOGLE_CLIENT_ID__?: string }).__APPLYRON_GOOGLE_CLIENT_ID__,
+  );
   const clientSecret = normalizeGoogleOAuthCredential(
-    buildGlobals.__APPLYRON_GOOGLE_CLIENT_SECRET__,
+    (globalThis as { __APPLYRON_GOOGLE_CLIENT_SECRET__?: string })
+      .__APPLYRON_GOOGLE_CLIENT_SECRET__,
   );
 
   if (!clientId || !clientSecret) {

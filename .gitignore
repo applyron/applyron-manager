@@ -146,3 +146,4 @@ run_cli.bat
 test-process.ts
 test.db
 .tmp-codex-schema/
+.tmp-codex-debug-home/

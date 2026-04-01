@@ -33,6 +33,19 @@ npm install
 npm start
 ```
 
+Google hesabi girisini yerelde test edecekseniz, uygulamayi baslatmadan once `.env.example` dosyasindan `.env.local` turetip kendi OAuth bilgilerinizi girin:
+
+```bash
+copy .env.example .env.local
+```
+
+Gerekli anahtarlar:
+
+- `APPLYRON_GOOGLE_CLIENT_ID`
+- `APPLYRON_GOOGLE_CLIENT_SECRET`
+
+`.env.local` dosyasini private tutun. Git tarafinda ignore edilir ve commit edilmemelidir.
+
 Sik kullanilan kalite kapilari:
 
 ```bash

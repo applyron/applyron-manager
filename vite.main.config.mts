@@ -1,16 +1,18 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import path from 'path';
 
 // https://vitejs.dev/config
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const googleClientId =
+    process.env.APPLYRON_GOOGLE_CLIENT_ID ?? env.APPLYRON_GOOGLE_CLIENT_ID ?? '';
+  const googleClientSecret =
+    process.env.APPLYRON_GOOGLE_CLIENT_SECRET ?? env.APPLYRON_GOOGLE_CLIENT_SECRET ?? '';
+
   return {
     define: {
-      'globalThis.__APPLYRON_GOOGLE_CLIENT_ID__': JSON.stringify(
-        process.env.APPLYRON_GOOGLE_CLIENT_ID ?? '',
-      ),
-      'globalThis.__APPLYRON_GOOGLE_CLIENT_SECRET__': JSON.stringify(
-        process.env.APPLYRON_GOOGLE_CLIENT_SECRET ?? '',
-      ),
+      'globalThis.__APPLYRON_GOOGLE_CLIENT_ID__': JSON.stringify(googleClientId),
+      'globalThis.__APPLYRON_GOOGLE_CLIENT_SECRET__': JSON.stringify(googleClientSecret),
     },
     resolve: {
       alias: {

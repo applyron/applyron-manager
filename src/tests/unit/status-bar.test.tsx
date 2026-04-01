@@ -108,9 +108,9 @@ describe('StatusBar', () => {
     expect(screen.getByText('Araçlar')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Gemini Uygulaması' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Codex Uygulaması' })).toBeTruthy();
-    expect(screen.getByText('Gemini')).toBeTruthy();
-    expect(screen.getByText('Codex')).toBeTruthy();
-    expect(screen.getAllByText('Çalışıyor')).toHaveLength(2);
+    expect(screen.queryByText('Gemini')).toBeNull();
+    expect(screen.queryByText('Codex')).toBeNull();
+    expect(screen.queryAllByText('Çalışıyor')).toHaveLength(0);
     expect(mockUseQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         staleTime: 30_000,

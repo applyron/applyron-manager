@@ -55,26 +55,6 @@ function QuickActionButton(props: {
   );
 }
 
-function StatusRow(props: { label: string; stateLabel: string; isRunning: boolean }) {
-  const tone = getHudTone(props.isRunning ? 'success' : 'danger');
-
-  return (
-    <div className="flex items-center justify-between gap-2 text-[10px] tracking-[0.16em] text-[var(--hud-text-subtle)] uppercase">
-      <div className="flex items-center gap-2">
-        <span
-          className="h-1.5 w-1.5 rounded-full"
-          style={{
-            background: tone.solid,
-            boxShadow: props.isRunning ? tone.glow : 'none',
-          }}
-        />
-        <span>{props.label}</span>
-      </div>
-      <span>{props.stateLabel}</span>
-    </div>
-  );
-}
-
 export const StatusBar: React.FC = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -158,17 +138,6 @@ export const StatusBar: React.FC = () => {
   const isClassicPending = startClassicMutation.isPending || stopClassicMutation.isPending;
   const isCodexPending = startCodexMutation.isPending || stopCodexMutation.isPending;
 
-  const classicStateLabel = isClassicLoading
-    ? t('statusBar.checking')
-    : isClassicRunning
-      ? t('statusBar.running')
-      : t('statusBar.stopped');
-  const codexStateLabel = codexStatus.isLoading
-    ? t('statusBar.checking')
-    : isCodexRunning
-      ? t('statusBar.running')
-      : t('statusBar.stopped');
-
   return (
     <TooltipProvider delayDuration={0}>
       <div
@@ -183,7 +152,13 @@ export const StatusBar: React.FC = () => {
         <div className="mt-3 flex flex-col items-center gap-2">
           <QuickActionButton
             label={t('statusBar.classicActionLabel')}
-            stateLabel={classicStateLabel}
+            stateLabel={
+              isClassicLoading
+                ? t('statusBar.checking')
+                : isClassicRunning
+                  ? t('statusBar.running')
+                  : t('statusBar.stopped')
+            }
             isRunning={Boolean(isClassicRunning)}
             isPending={isClassicPending}
             onClick={handleClassicToggle}
@@ -191,24 +166,17 @@ export const StatusBar: React.FC = () => {
           />
           <QuickActionButton
             label={t('statusBar.codexActionLabel')}
-            stateLabel={codexStateLabel}
+            stateLabel={
+              codexStatus.isLoading
+                ? t('statusBar.checking')
+                : isCodexRunning
+                  ? t('statusBar.running')
+                  : t('statusBar.stopped')
+            }
             isRunning={isCodexRunning}
             isPending={isCodexPending}
             onClick={handleCodexToggle}
             disabled={codexStatus.isLoading}
-          />
-        </div>
-
-        <div className="mt-3 flex flex-col gap-1 text-center">
-          <StatusRow
-            label={t('statusBar.classicShortLabel')}
-            stateLabel={classicStateLabel}
-            isRunning={Boolean(isClassicRunning)}
-          />
-          <StatusRow
-            label={t('statusBar.codexShortLabel')}
-            stateLabel={codexStateLabel}
-            isRunning={isCodexRunning}
           />
         </div>
       </div>
