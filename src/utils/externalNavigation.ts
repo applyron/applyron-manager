@@ -33,18 +33,19 @@ function getChromeExecutablePath(): string | null {
     return null;
   }
 
+  const joinPath = path.win32.join;
   const candidates = [
     process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ? joinPath(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')
       : null,
     process.env.PROGRAMFILES
-      ? path.join(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ? joinPath(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe')
       : null,
     process.env['PROGRAMFILES(X86)']
-      ? path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ? joinPath(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe')
       : null,
     process.env.PROGRAMW6432
-      ? path.join(process.env.PROGRAMW6432, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ? joinPath(process.env.PROGRAMW6432, 'Google', 'Chrome', 'Application', 'chrome.exe')
       : null,
   ].filter((candidate): candidate is string => Boolean(candidate));
 
