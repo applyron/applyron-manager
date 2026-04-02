@@ -219,12 +219,12 @@ export interface IPCClient {
     openIde(input?: { targetId?: ManagedIdeTargetId } | null): Promise<void>;
     openLoginGuidance(input?: { targetId?: ManagedIdeTargetId } | null): Promise<void>;
     listCodexAccounts(): Promise<CodexAccountRecord[]>;
-    addCodexAccount(): Promise<CodexAccountRecord>;
+    addCodexAccount(): Promise<CodexAccountRecord[]>;
     importCurrentCodexAccount(): Promise<CodexAccountRecord>;
-    refreshCodexAccount(input: { accountId: string }): Promise<CodexAccountRecord>;
+    refreshCodexAccount(input: { id: string }): Promise<CodexAccountRecord>;
     refreshAllCodexAccounts(): Promise<CodexAccountRecord[]>;
-    activateCodexAccount(input: { accountId: string }): Promise<CodexAccountRecord>;
-    deleteCodexAccount(input: { accountId: string }): Promise<void>;
+    activateCodexAccount(input: { id: string }): Promise<CodexAccountRecord>;
+    deleteCodexAccount(input: { id: string }): Promise<void>;
   };
   system: {
     openLogDirectory(): Promise<void>;

@@ -8,6 +8,7 @@ import { getAccountsFilePath, getBackupsDir, getAgentDir } from '../../utils/pat
 import { Account, AccountBackupData, AccountBackupDataSchema } from '../../types/account';
 import { CloudAccount } from '../../types/cloudAccount';
 import { CodexAccountStore } from '../../managedIde/codexAccountStore';
+import { getCodexRecordIdentityKey } from '../../managedIde/codexIdentity';
 import { CloudAccountRepo } from '../database/cloudHandler';
 import { ActivityLogService } from '../../services/ActivityLogService';
 import {
@@ -30,8 +31,39 @@ type ImportPreviewCacheEntry = {
   summary: ImportPreviewSummary;
 };
 
+type CodexIdentityComparable = {
+  accountId: string;
+  email: string | null;
+  workspace?: { id: string } | null;
+};
+
 const importPreviewCache = new Map<string, ImportPreviewCacheEntry>();
 const PORTABLE_EXPORT_EXTENSION = 'applyron-export';
+
+function getWorkspaceAgnosticCodexEmailKey(account: {
+  email: string | null;
+  workspace?: { id: string } | null;
+}): string | null {
+  const normalizedEmail = account.email?.trim().toLowerCase();
+  if (!normalizedEmail || account.workspace?.id) {
+    return null;
+  }
+
+  return normalizedEmail;
+}
+
+function findMatchingCodexAccount<T extends CodexIdentityComparable>(
+  existingByIdentityKey: Map<string, T>,
+  existingWorkspacelessByEmail: Map<string, T>,
+  record: CodexIdentityComparable,
+): T | undefined {
+  return (
+    existingByIdentityKey.get(getCodexRecordIdentityKey(record)) ??
+    (getWorkspaceAgnosticCodexEmailKey(record)
+      ? existingWorkspacelessByEmail.get(getWorkspaceAgnosticCodexEmailKey(record) as string)
+      : undefined)
+  );
+}
 
 function getDialogParentWindow() {
   return ipcContext.mainWindow;
@@ -194,13 +226,13 @@ async function buildImportPreviewSummary(
   const existingCloudByKey = new Map(
     existingCloud.map((account) => [`${account.provider}:${account.email.toLowerCase()}`, account]),
   );
-  const existingCodexByAccountId = new Map(
-    existingCodex.map((account) => [account.accountId, account]),
+  const existingCodexByIdentityKey = new Map(
+    existingCodex.map((account) => [getCodexRecordIdentityKey(account), account]),
   );
-  const existingCodexByEmail = new Map(
+  const existingCodexWorkspacelessByEmail = new Map(
     existingCodex
-      .filter((account) => typeof account.email === 'string' && account.email.trim() !== '')
-      .map((account) => [String(account.email).toLowerCase(), account]),
+      .map((account) => [getWorkspaceAgnosticCodexEmailKey(account), account] as const)
+      .filter((entry): entry is [string, (typeof existingCodex)[number]] => entry[0] !== null),
   );
 
   const legacyMatches = payload.legacy.filter(({ account }) =>
@@ -209,15 +241,14 @@ async function buildImportPreviewSummary(
   const cloudMatches = payload.cloud.filter((account) =>
     existingCloudByKey.has(`${account.provider}:${account.email.toLowerCase()}`),
   );
-  const codexMatches = payload.codex.filter(({ record }) => {
-    if (existingCodexByAccountId.has(record.accountId)) {
-      return true;
-    }
-    if (record.email) {
-      return existingCodexByEmail.has(record.email.toLowerCase());
-    }
-    return false;
-  });
+  const codexMatches = payload.codex.filter(
+    ({ record }) =>
+      findMatchingCodexAccount(
+        existingCodexByIdentityKey,
+        existingCodexWorkspacelessByEmail,
+        record,
+      ) !== undefined,
+  );
 
   return {
     previewId,
@@ -256,13 +287,13 @@ async function applyPortableImportPayload(
   const existingCloudByKey = new Map(
     existingCloud.map((account) => [`${account.provider}:${account.email.toLowerCase()}`, account]),
   );
-  const existingCodexByAccountId = new Map(
-    existingCodex.map((account) => [account.accountId, account]),
+  const existingCodexByIdentityKey = new Map(
+    existingCodex.map((account) => [getCodexRecordIdentityKey(account), account]),
   );
-  const existingCodexByEmail = new Map(
+  const existingCodexWorkspacelessByEmail = new Map(
     existingCodex
-      .filter((account) => typeof account.email === 'string' && account.email.trim() !== '')
-      .map((account) => [String(account.email).toLowerCase(), account]),
+      .map((account) => [getWorkspaceAgnosticCodexEmailKey(account), account] as const)
+      .filter((entry): entry is [string, (typeof existingCodex)[number]] => entry[0] !== null),
   );
 
   const result: ImportApplyResult = {
@@ -316,11 +347,11 @@ async function applyPortableImportPayload(
   }
 
   for (const importedCodex of payload.codex) {
-    const existing =
-      existingCodexByAccountId.get(importedCodex.record.accountId) ??
-      (importedCodex.record.email
-        ? existingCodexByEmail.get(importedCodex.record.email.toLowerCase())
-        : undefined);
+    const existing = findMatchingCodexAccount(
+      existingCodexByIdentityKey,
+      existingCodexWorkspacelessByEmail,
+      importedCodex.record,
+    );
 
     const authFile =
       importedCodex.authFile ??
@@ -334,10 +365,12 @@ async function applyPortableImportPayload(
     }
 
     await CodexAccountStore.upsertAccount({
-      accountId: existing?.accountId ?? importedCodex.record.accountId,
+      existingId: existing?.id ?? null,
+      accountId: importedCodex.record.accountId,
       email: importedCodex.record.email ?? existing?.email ?? null,
       label: importedCodex.record.label ?? existing?.label ?? null,
       authMode: importedCodex.record.authMode ?? existing?.authMode ?? null,
+      workspace: importedCodex.record.workspace ?? existing?.workspace ?? null,
       authFile,
       snapshot:
         importedCodex.snapshot ?? importedCodex.record.snapshot ?? existing?.snapshot ?? null,

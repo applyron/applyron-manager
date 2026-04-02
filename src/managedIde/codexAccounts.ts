@@ -1,4 +1,5 @@
 import { getCodexRemainingRequestPercent, getCodexWindowKind } from './codexMetadata';
+import { getCodexRecordIdentityKey } from './codexIdentity';
 import type { CodexAccountRecord, ManagedIdeQuotaWindow } from './types';
 
 function getWeeklyQuotaWindow(account: CodexAccountRecord): ManagedIdeQuotaWindow | null {
@@ -47,16 +48,17 @@ function compareCodexAccountFreshness(left: CodexAccountRecord, right: CodexAcco
 }
 
 export function normalizeCodexAccounts(accounts: CodexAccountRecord[]): CodexAccountRecord[] {
-  const preferredByAccountId = new Map<string, CodexAccountRecord>();
+  const preferredByIdentityKey = new Map<string, CodexAccountRecord>();
 
   for (const account of accounts) {
-    const existing = preferredByAccountId.get(account.accountId);
+    const identityKey = getCodexRecordIdentityKey(account);
+    const existing = preferredByIdentityKey.get(identityKey);
     if (!existing || compareCodexAccountFreshness(account, existing) < 0) {
-      preferredByAccountId.set(account.accountId, account);
+      preferredByIdentityKey.set(identityKey, account);
     }
   }
 
-  const deduped = Array.from(preferredByAccountId.values());
+  const deduped = Array.from(preferredByIdentityKey.values());
   const activeAccounts = deduped
     .filter((account) => account.isActive)
     .sort(compareCodexAccountFreshness);

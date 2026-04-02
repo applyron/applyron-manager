@@ -1,5 +1,9 @@
 import { ORPCError, os } from '@orpc/server';
 import { z } from 'zod';
+import {
+  getCodexAccountDisplayIdentity,
+  getCodexWorkspaceLabel,
+} from '../../managedIde/codexIdentity';
 import { ManagedIdeService } from '../../managedIde/service';
 import {
   CodexAccountRecordSchema,
@@ -10,6 +14,22 @@ import { isCloudStorageUnavailableError } from '../database/cloudHandler';
 import { ActivityLogService } from '../../services/ActivityLogService';
 
 const ManagedIdeTargetIdSchema = z.enum(['antigravity', 'vscode-codex']);
+
+function buildCodexActivityTarget(account: {
+  accountId: string;
+  email: string | null;
+  label: string | null;
+  workspace?: { title: string | null; id: string } | null;
+}) {
+  const identity = getCodexAccountDisplayIdentity(account);
+  const workspaceLabel = getCodexWorkspaceLabel(account.workspace ?? null);
+
+  if (workspaceLabel && account.email) {
+    return `${account.email} (${workspaceLabel})`;
+  }
+
+  return identity;
+}
 
 function toManagedIdeRpcError(error: unknown): ORPCError<string, { reason: string }> {
   if (error instanceof ORPCError) {
@@ -127,18 +147,20 @@ export const managedIdeRouter = os.router({
     }
   }),
 
-  addCodexAccount: os.output(CodexAccountRecordSchema).handler(async () => {
+  addCodexAccount: os.output(z.array(CodexAccountRecordSchema)).handler(async () => {
     try {
-      const account = await ManagedIdeService.addCodexAccount();
-      ActivityLogService.record({
-        category: 'codex',
-        action: 'add',
-        target: account.email ?? account.accountId,
-        outcome: 'success',
-        message: 'Codex account added.',
-        metadata: { accountId: account.accountId },
-      });
-      return account;
+      const accounts = await ManagedIdeService.addCodexAccount();
+      for (const account of accounts) {
+        ActivityLogService.record({
+          category: 'codex',
+          action: 'add',
+          target: buildCodexActivityTarget(account),
+          outcome: 'success',
+          message: 'Codex account added.',
+          metadata: { accountId: account.accountId, workspaceId: account.workspace?.id ?? null },
+        });
+      }
+      return accounts;
     } catch (error) {
       ActivityLogService.record({
         category: 'codex',
@@ -157,10 +179,10 @@ export const managedIdeRouter = os.router({
       ActivityLogService.record({
         category: 'codex',
         action: 'import',
-        target: account.email ?? account.accountId,
+        target: buildCodexActivityTarget(account),
         outcome: 'success',
         message: 'Codex session imported.',
-        metadata: { accountId: account.accountId },
+        metadata: { accountId: account.accountId, workspaceId: account.workspace?.id ?? null },
       });
       return account;
     } catch (error) {
@@ -178,27 +200,27 @@ export const managedIdeRouter = os.router({
   refreshCodexAccount: os
     .input(
       z.object({
-        accountId: z.string().min(1),
+        id: z.string().min(1),
       }),
     )
     .output(CodexAccountRecordSchema)
     .handler(async ({ input }) => {
       try {
-        const account = await ManagedIdeService.refreshCodexAccount(input.accountId);
+        const account = await ManagedIdeService.refreshCodexAccount(input.id);
         ActivityLogService.record({
           category: 'codex',
           action: 'refresh',
-          target: account.email ?? account.accountId,
+          target: buildCodexActivityTarget(account),
           outcome: 'success',
           message: 'Codex account refreshed.',
-          metadata: { accountId: account.accountId },
+          metadata: { accountId: account.accountId, workspaceId: account.workspace?.id ?? null },
         });
         return account;
       } catch (error) {
         ActivityLogService.record({
           category: 'codex',
           action: 'refresh',
-          target: input.accountId,
+          target: input.id,
           outcome: 'failure',
           message: error instanceof Error ? error.message : 'Codex refresh failed.',
         });
@@ -233,27 +255,27 @@ export const managedIdeRouter = os.router({
   activateCodexAccount: os
     .input(
       z.object({
-        accountId: z.string().min(1),
+        id: z.string().min(1),
       }),
     )
     .output(CodexAccountRecordSchema)
     .handler(async ({ input }) => {
       try {
-        const account = await ManagedIdeService.activateCodexAccount(input.accountId);
+        const account = await ManagedIdeService.activateCodexAccount(input.id);
         ActivityLogService.record({
           category: 'codex',
           action: 'activate',
-          target: account.email ?? account.accountId,
+          target: buildCodexActivityTarget(account),
           outcome: 'success',
           message: 'Codex account activated.',
-          metadata: { accountId: account.accountId },
+          metadata: { accountId: account.accountId, workspaceId: account.workspace?.id ?? null },
         });
         return account;
       } catch (error) {
         ActivityLogService.record({
           category: 'codex',
           action: 'activate',
-          target: input.accountId,
+          target: input.id,
           outcome: 'failure',
           message: error instanceof Error ? error.message : 'Codex activate failed.',
         });
@@ -264,25 +286,34 @@ export const managedIdeRouter = os.router({
   deleteCodexAccount: os
     .input(
       z.object({
-        accountId: z.string().min(1),
+        id: z.string().min(1),
       }),
     )
     .output(z.void())
     .handler(async ({ input }) => {
       try {
-        await ManagedIdeService.deleteCodexAccount(input.accountId);
+        const existingAccount = (await ManagedIdeService.listCodexAccounts()).find(
+          (account) => account.id === input.id,
+        );
+        await ManagedIdeService.deleteCodexAccount(input.id);
         ActivityLogService.record({
           category: 'codex',
           action: 'delete',
-          target: input.accountId,
+          target: existingAccount ? buildCodexActivityTarget(existingAccount) : input.id,
           outcome: 'success',
           message: 'Codex account deleted.',
+          metadata: existingAccount
+            ? {
+                accountId: existingAccount.accountId,
+                workspaceId: existingAccount.workspace?.id ?? null,
+              }
+            : { id: input.id },
         });
       } catch (error) {
         ActivityLogService.record({
           category: 'codex',
           action: 'delete',
-          target: input.accountId,
+          target: input.id,
           outcome: 'failure',
           message: error instanceof Error ? error.message : 'Codex delete failed.',
         });

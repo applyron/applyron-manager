@@ -33,6 +33,7 @@ import { useAppConfig } from '@/hooks/useAppConfig';
 import { getCodexRemainingRequestPercent, getCodexWindowKind } from '@/managedIde/codexMetadata';
 import { getCodexHealthState } from '@/managedIde/codexHealth';
 import { sortCodexAccounts } from '@/managedIde/codexAccounts';
+import { getCodexAccountDisplayIdentity, getCodexWorkspaceLabel } from '@/managedIde/codexIdentity';
 import type { CodexAccountRecord } from '@/managedIde/types';
 import { getLocalizedErrorMessage } from '@/utils/errorMessages';
 import { GridLayout, normalizeGridLayout } from '@/types/config';
@@ -124,7 +125,14 @@ function AccountCard({
   const session = account.snapshot?.session;
   const quota = account.snapshot?.quota;
   const canSelect = Boolean(onToggleSelection) && !account.isActive;
-  const accountIdentity = account.label || account.email || account.accountId;
+  const accountIdentity = getCodexAccountDisplayIdentity({
+    ...account,
+    planType: session?.planType,
+  });
+  const secondaryIdentity =
+    account.email?.trim() && account.email.trim() !== accountIdentity ? account.email.trim() : null;
+  const workspaceLabel = getCodexWorkspaceLabel(account.workspace);
+  const showWorkspaceLabel = Boolean(workspaceLabel && workspaceLabel !== accountIdentity);
   const healthTone =
     healthState === 'ready'
       ? getHudTone('info')
@@ -195,7 +203,7 @@ function AccountCard({
               className="text-foreground text-base font-semibold"
               style={{ fontFamily: 'Tomorrow, sans-serif' }}
             >
-              {account.label || account.email || t('managedIde.empty.noAccount')}
+              {accountIdentity}
             </h3>
             {account.isActive ? (
               <span
@@ -223,9 +231,18 @@ function AccountCard({
                   : t('cloud.codex.health.attention')}
             </span>
           </div>
-          <p className="text-muted-foreground text-[12px]">
-            {account.email || t('cloud.codex.labels.accountIdPrefix', { id: account.accountId })}
-          </p>
+          {secondaryIdentity ? (
+            <p className="text-muted-foreground text-[12px]">{secondaryIdentity}</p>
+          ) : account.email ? null : (
+            <p className="text-muted-foreground text-[12px]">
+              {t('cloud.codex.labels.accountIdPrefix', { id: account.accountId })}
+            </p>
+          )}
+          {showWorkspaceLabel ? (
+            <p className="text-muted-foreground text-[12px]">
+              {t('cloud.codex.labels.workspacePrefix', { name: workspaceLabel })}
+            </p>
+          ) : null}
         </div>
         <div className="flex items-start gap-2">
           <div className="text-right">
@@ -452,10 +469,19 @@ export function CodexAccountPanel() {
 
   const handleAddAccount = () => {
     addMutation.mutate(undefined, {
-      onSuccess: (account) => {
+      onSuccess: (accounts) => {
+        const description =
+          accounts.length === 1
+            ? (accounts[0]?.email ??
+              getCodexAccountDisplayIdentity({
+                ...accounts[0],
+                planType: accounts[0]?.snapshot?.session.planType,
+              }) ??
+              t('cloud.codex.toast.addedDescription'))
+            : t('cloud.codex.toast.addedBatchDescription', { count: accounts.length });
         toast({
           title: t('cloud.codex.toast.addedTitle'),
-          description: account.email || t('cloud.codex.toast.addedDescription'),
+          description,
         });
       },
       onError: (error) => {
@@ -516,19 +542,30 @@ export function CodexAccountPanel() {
     });
   };
 
-  const handleDeleteAccount = (accountId: string) => {
-    const targetAccount = accounts.find((account) => account.id === accountId);
-    const accountIdentity =
-      targetAccount?.label || targetAccount?.email || targetAccount?.accountId || accountId;
-    if (!window.confirm(t('cloud.codex.confirmDelete', { target: accountIdentity }))) {
+  const handleDeleteAccount = (id: string) => {
+    const targetAccount = accounts.find((account) => account.id === id);
+    const accountIdentity = targetAccount
+      ? getCodexAccountDisplayIdentity({
+          ...targetAccount,
+          planType: targetAccount.snapshot?.session.planType,
+        })
+      : id;
+    const workspaceLabel = targetAccount ? getCodexWorkspaceLabel(targetAccount.workspace) : null;
+    const deleteTarget =
+      workspaceLabel && targetAccount?.email
+        ? `${targetAccount.email} (${workspaceLabel})`
+        : workspaceLabel && !targetAccount?.email
+          ? workspaceLabel
+          : accountIdentity;
+    if (!window.confirm(t('cloud.codex.confirmDelete', { target: deleteTarget }))) {
       return;
     }
 
-    deleteMutation.mutate(accountId, {
+    deleteMutation.mutate(id, {
       onSuccess: () => {
         toast({
           title: t('cloud.codex.toast.deletedTitle'),
-          description: t('cloud.codex.toast.deletedDescription'),
+          description: deleteTarget,
         });
       },
       onError: (error) => {

@@ -97,6 +97,13 @@ export const CodexAuthFileSchema = z.object({
   last_refresh: z.string().nullable(),
 });
 
+export const CodexWorkspaceSummarySchema = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  role: z.string().nullable(),
+  isDefault: z.boolean(),
+});
+
 export const CodexAccountSnapshotSchema = z.object({
   session: ManagedIdeSessionSnapshotSchema,
   quota: ManagedIdeQuotaSnapshotSchema.nullable(),
@@ -110,6 +117,7 @@ export const CodexAccountRecordSchema = z.object({
   label: z.string().nullable(),
   accountId: z.string(),
   authMode: z.string().nullable(),
+  workspace: CodexWorkspaceSummarySchema.nullable().optional().default(null),
   isActive: z.boolean(),
   sortOrder: z.number(),
   createdAt: z.number(),

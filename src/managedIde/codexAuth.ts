@@ -2,7 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { logger } from '../utils/logger';
-import type { CodexAuthFile } from './types';
+import { isCodexPersonalWorkspace, isCodexTeamPlan } from './codexIdentity';
+import type { CodexAuthFile, CodexWorkspaceSummary } from './types';
 import { CodexAuthFileSchema } from './schemas';
 
 export function getCodexHomePath(): string {
@@ -77,6 +78,165 @@ export function decodeJwtClaims(token: string | null | undefined): Record<string
   } catch {
     return null;
   }
+}
+
+function getCodexAuthClaims(authFile: CodexAuthFile | null): Record<string, unknown> | null {
+  if (!authFile?.tokens) {
+    return null;
+  }
+
+  const idTokenClaims = decodeJwtClaims(authFile.tokens.id_token);
+  const authClaims = idTokenClaims?.['https://api.openai.com/auth'];
+  return authClaims && typeof authClaims === 'object'
+    ? (authClaims as Record<string, unknown>)
+    : null;
+}
+
+function getNormalizedString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeWorkspaceCandidate(candidate: unknown): CodexWorkspaceSummary | null {
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+
+  const value = candidate as Record<string, unknown>;
+  const id =
+    getNormalizedString(value.id) ??
+    getNormalizedString(value.organization_id) ??
+    getNormalizedString(value.organizationId) ??
+    getNormalizedString(value.org_id) ??
+    getNormalizedString(value.orgId) ??
+    getNormalizedString(value.workspace_id) ??
+    getNormalizedString(value.workspaceId) ??
+    '';
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    title:
+      getNormalizedString(value.title) ??
+      getNormalizedString(value.name) ??
+      getNormalizedString(value.display_name) ??
+      getNormalizedString(value.displayName) ??
+      getNormalizedString(value.workspace_name) ??
+      getNormalizedString(value.workspaceName) ??
+      getNormalizedString(value.slug),
+    role:
+      getNormalizedString(value.role) ??
+      getNormalizedString(value.membership_role) ??
+      getNormalizedString(value.membershipRole),
+    isDefault: value.is_default === true || value.isDefault === true || value.default === true,
+  };
+}
+
+function getWorkspaceIdHints(authClaims: Record<string, unknown> | null): string[] {
+  if (!authClaims) {
+    return [];
+  }
+
+  return [
+    authClaims.active_organization_id,
+    authClaims.activeOrganizationId,
+    authClaims.organization_id,
+    authClaims.organizationId,
+    authClaims.current_organization_id,
+    authClaims.currentOrganizationId,
+    authClaims.workspace_id,
+    authClaims.workspaceId,
+    authClaims.default_organization_id,
+    authClaims.defaultOrganizationId,
+  ]
+    .map(getNormalizedString)
+    .filter((value): value is string => value !== null);
+}
+
+function getWorkspaceCandidates(
+  authClaims: Record<string, unknown> | null,
+): CodexWorkspaceSummary[] {
+  if (!authClaims) {
+    return [];
+  }
+
+  const candidates = [
+    authClaims.active_organization,
+    authClaims.activeOrganization,
+    authClaims.organization,
+    authClaims.current_organization,
+    authClaims.currentOrganization,
+    authClaims.workspace,
+    ...(Array.isArray(authClaims.organizations) ? authClaims.organizations : []),
+  ]
+    .map(normalizeWorkspaceCandidate)
+    .filter((workspace): workspace is CodexWorkspaceSummary => workspace !== null);
+
+  const deduped = new Map<string, CodexWorkspaceSummary>();
+  for (const workspace of candidates) {
+    const existing = deduped.get(workspace.id);
+    if (
+      !existing ||
+      (!existing.title && workspace.title) ||
+      (!existing.isDefault && workspace.isDefault)
+    ) {
+      deduped.set(workspace.id, workspace);
+    }
+  }
+
+  return Array.from(deduped.values());
+}
+
+export function getCodexWorkspaceFromAuthFile(
+  authFile: CodexAuthFile | null,
+  options?: {
+    planType?: string | null;
+  },
+): CodexWorkspaceSummary | null {
+  const authClaims = getCodexAuthClaims(authFile);
+  const organizations = getWorkspaceCandidates(authClaims);
+
+  if (organizations.length === 0) {
+    return null;
+  }
+
+  const hintedWorkspace = getWorkspaceIdHints(authClaims)
+    .map((workspaceId) => organizations.find((workspace) => workspace.id === workspaceId) ?? null)
+    .find((workspace): workspace is CodexWorkspaceSummary => workspace !== null);
+  if (hintedWorkspace) {
+    return hintedWorkspace;
+  }
+
+  if (isCodexTeamPlan(options?.planType)) {
+    const teamWorkspace =
+      organizations.find(
+        (workspace) => workspace.isDefault && !isCodexPersonalWorkspace(workspace),
+      ) ?? organizations.find((workspace) => !isCodexPersonalWorkspace(workspace));
+    if (teamWorkspace) {
+      return teamWorkspace;
+    }
+  }
+
+  const defaultWorkspace = organizations.find((workspace) => workspace.isDefault);
+  if (defaultWorkspace) {
+    return defaultWorkspace;
+  }
+
+  if (organizations.length === 1) {
+    return organizations[0];
+  }
+
+  logger.warn('Codex workspace could not be resolved from auth token organizations', {
+    organizationsCount: organizations.length,
+    planType: options?.planType ?? null,
+  });
+  return organizations[0] ?? null;
 }
 
 export function getCodexEmailHint(authFile: CodexAuthFile | null): string | null {

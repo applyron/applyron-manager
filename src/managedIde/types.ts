@@ -117,6 +117,13 @@ export interface CodexAuthFile {
   last_refresh: string | null;
 }
 
+export interface CodexWorkspaceSummary {
+  id: string;
+  title: string | null;
+  role: string | null;
+  isDefault: boolean;
+}
+
 export interface CodexAccountSnapshot {
   session: ManagedIdeSessionSnapshot;
   quota: ManagedIdeQuotaSnapshot | null;
@@ -130,6 +137,7 @@ export interface CodexAccountRecord {
   label: string | null;
   accountId: string;
   authMode: string | null;
+  workspace: CodexWorkspaceSummary | null;
   isActive: boolean;
   sortOrder: number;
   createdAt: number;

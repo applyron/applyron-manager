@@ -9,7 +9,9 @@ import { logger } from '../../utils/logger';
 import { CloudAccount } from '../../types/cloudAccount';
 import { type DeviceProfile, type DeviceProfileVersion } from '../../types/account';
 import { ItemTableValueRowSchema, TableInfoRowSchema } from '../../types/db';
-import { decryptWithMigration, encrypt, type KeySource } from '../../utils/security';
+import { getCodexWorkspaceFromAuthFile } from '../../managedIde/codexAuth';
+import { getCodexIdentityKey } from '../../managedIde/codexIdentity';
+import { decrypt, decryptWithMigration, encrypt, type KeySource } from '../../utils/security';
 import { ProtobufUtils } from '../../utils/protobuf';
 import { GoogleAPIService } from '../../services/GoogleAPIService';
 import { getAntigravityVersion, isNewVersion } from '../../utils/antigravityVersion';
@@ -96,6 +98,11 @@ function getAccountsTableInfo(db: Database.Database) {
   return parseRows(TableInfoRowSchema, tableInfoRaw, 'cloud.accounts.tableInfo');
 }
 
+function getCodexAccountsTableInfo(db: Database.Database) {
+  const tableInfoRaw = db.pragma('table_info(codex_accounts)') as unknown[];
+  return parseRows(TableInfoRowSchema, tableInfoRaw, 'cloud.codexAccounts.tableInfo');
+}
+
 function ensureCloudSchemaMetadata(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -108,6 +115,18 @@ function ensureCloudSchemaMetadata(db: Database.Database): void {
 
 function ensureAccountsColumn(db: Database.Database, columnName: string, alterSql: string): void {
   const tableInfo = getAccountsTableInfo(db);
+  if (tableInfo.some((column) => column.name === columnName)) {
+    return;
+  }
+  db.exec(alterSql);
+}
+
+function ensureCodexAccountsColumn(
+  db: Database.Database,
+  columnName: string,
+  alterSql: string,
+): void {
+  const tableInfo = getCodexAccountsTableInfo(db);
   if (tableInfo.some((column) => column.name === columnName)) {
     return;
   }
@@ -152,6 +171,199 @@ async function migratePlaintextAccountPayloads(db: Database.Database): Promise<v
   }
 }
 
+type CodexIdentityMigrationRow = {
+  id: string;
+  accountId: string;
+  workspaceId: string | null;
+  workspaceTitle: string | null;
+  workspaceRole: string | null;
+  workspaceIsDefault: number | null;
+  identityKey: string | null;
+  encryptedAuthJson: string;
+  isActive: number;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+  lastRefreshedAt: number | null;
+};
+
+function compareCodexMigrationRowFreshness(
+  left: Pick<
+    CodexIdentityMigrationRow,
+    'id' | 'isActive' | 'updatedAt' | 'lastRefreshedAt' | 'createdAt'
+  >,
+  right: Pick<
+    CodexIdentityMigrationRow,
+    'id' | 'isActive' | 'updatedAt' | 'lastRefreshedAt' | 'createdAt'
+  >,
+): number {
+  if (left.isActive !== right.isActive) {
+    return right.isActive - left.isActive;
+  }
+
+  if (left.updatedAt !== right.updatedAt) {
+    return right.updatedAt - left.updatedAt;
+  }
+
+  if ((left.lastRefreshedAt ?? 0) !== (right.lastRefreshedAt ?? 0)) {
+    return (right.lastRefreshedAt ?? 0) - (left.lastRefreshedAt ?? 0);
+  }
+
+  if (left.createdAt !== right.createdAt) {
+    return right.createdAt - left.createdAt;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+async function migrateCodexWorkspaceIdentities(db: Database.Database): Promise<void> {
+  ensureCodexAccountsColumn(
+    db,
+    'workspace_id',
+    'ALTER TABLE codex_accounts ADD COLUMN workspace_id TEXT',
+  );
+  ensureCodexAccountsColumn(
+    db,
+    'workspace_title',
+    'ALTER TABLE codex_accounts ADD COLUMN workspace_title TEXT',
+  );
+  ensureCodexAccountsColumn(
+    db,
+    'workspace_role',
+    'ALTER TABLE codex_accounts ADD COLUMN workspace_role TEXT',
+  );
+  ensureCodexAccountsColumn(
+    db,
+    'workspace_is_default',
+    'ALTER TABLE codex_accounts ADD COLUMN workspace_is_default INTEGER NOT NULL DEFAULT 0',
+  );
+  ensureCodexAccountsColumn(
+    db,
+    'identity_key',
+    "ALTER TABLE codex_accounts ADD COLUMN identity_key TEXT NOT NULL DEFAULT ''",
+  );
+
+  db.exec('DROP INDEX IF EXISTS idx_codex_accounts_account_id');
+  db.exec('DROP INDEX IF EXISTS idx_codex_accounts_identity_key');
+
+  const rows = db
+    .prepare(
+      `SELECT
+        id,
+        account_id AS accountId,
+        workspace_id AS workspaceId,
+        workspace_title AS workspaceTitle,
+        workspace_role AS workspaceRole,
+        workspace_is_default AS workspaceIsDefault,
+        identity_key AS identityKey,
+        encrypted_auth_json AS encryptedAuthJson,
+        is_active AS isActive,
+        sort_order AS sortOrder,
+        created_at AS createdAt,
+        updated_at AS updatedAt,
+        last_refreshed_at AS lastRefreshedAt
+      FROM codex_accounts`,
+    )
+    .all() as CodexIdentityMigrationRow[];
+
+  const dedupedByIdentityKey = new Map<string, CodexIdentityMigrationRow>();
+
+  for (const row of rows) {
+    let workspaceId = row.workspaceId ?? null;
+    let workspaceTitle = row.workspaceTitle ?? null;
+    let workspaceRole = row.workspaceRole ?? null;
+    let workspaceIsDefault = row.workspaceIsDefault === 1 ? 1 : 0;
+
+    if (!workspaceId) {
+      try {
+        const decryptedAuth = await decrypt(row.encryptedAuthJson, {
+          suppressAuthTagMismatchLog: true,
+        });
+        const authFile = JSON.parse(decryptedAuth) as Parameters<
+          typeof getCodexWorkspaceFromAuthFile
+        >[0];
+        const workspace = getCodexWorkspaceFromAuthFile(authFile);
+        workspaceId = workspace?.id ?? null;
+        workspaceTitle = workspace?.title ?? null;
+        workspaceRole = workspace?.role ?? null;
+        workspaceIsDefault = workspace?.isDefault ? 1 : 0;
+      } catch (error) {
+        logger.warn(`Failed to decode Codex auth during workspace migration for ${row.id}`, error);
+      }
+    }
+
+    const identityKey = getCodexIdentityKey({
+      accountId: row.accountId,
+      workspace: workspaceId
+        ? {
+            id: workspaceId,
+            title: workspaceTitle,
+            role: workspaceRole,
+            isDefault: workspaceIsDefault === 1,
+          }
+        : null,
+    });
+
+    const normalizedRow: CodexIdentityMigrationRow = {
+      ...row,
+      workspaceId,
+      workspaceTitle,
+      workspaceRole,
+      workspaceIsDefault,
+      identityKey,
+    };
+
+    db.prepare(
+      `UPDATE codex_accounts
+       SET workspace_id = @workspaceId,
+           workspace_title = @workspaceTitle,
+           workspace_role = @workspaceRole,
+           workspace_is_default = @workspaceIsDefault,
+           identity_key = @identityKey
+       WHERE id = @id`,
+    ).run({
+      id: normalizedRow.id,
+      workspaceId: normalizedRow.workspaceId,
+      workspaceTitle: normalizedRow.workspaceTitle,
+      workspaceRole: normalizedRow.workspaceRole,
+      workspaceIsDefault: normalizedRow.workspaceIsDefault,
+      identityKey: normalizedRow.identityKey,
+    });
+
+    const existing = dedupedByIdentityKey.get(identityKey);
+    if (!existing || compareCodexMigrationRowFreshness(normalizedRow, existing) < 0) {
+      dedupedByIdentityKey.set(identityKey, normalizedRow);
+    }
+  }
+
+  const dedupedRows = Array.from(dedupedByIdentityKey.values());
+  const preferredActiveId =
+    dedupedRows.filter((row) => row.isActive === 1).sort(compareCodexMigrationRowFreshness)[0]
+      ?.id ?? null;
+
+  for (const row of dedupedRows) {
+    const normalizedIsActive = preferredActiveId && row.id === preferredActiveId ? 1 : 0;
+    if (row.isActive !== normalizedIsActive) {
+      db.prepare('UPDATE codex_accounts SET is_active = ? WHERE id = ?').run(
+        normalizedIsActive,
+        row.id,
+      );
+    }
+  }
+
+  const dedupedIds = new Set(dedupedRows.map((row) => row.id));
+  for (const row of rows) {
+    if (!dedupedIds.has(row.id)) {
+      db.prepare('DELETE FROM codex_accounts WHERE id = ?').run(row.id);
+    }
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_accounts_identity_key
+    ON codex_accounts(identity_key);
+  `);
+}
+
 const CLOUD_SCHEMA_MIGRATIONS: CloudSchemaMigration[] = [
   {
     version: 1,
@@ -190,6 +402,11 @@ const CLOUD_SCHEMA_MIGRATIONS: CloudSchemaMigration[] = [
     version: 4,
     name: 'encrypt_plaintext_account_payloads',
     apply: (db) => migratePlaintextAccountPayloads(db),
+  },
+  {
+    version: 5,
+    name: 'codex_workspace_identity',
+    apply: (db) => migrateCodexWorkspaceIdentities(db),
   },
 ];
 
@@ -383,6 +600,11 @@ export function ensureCloudDatabaseInitialized(dbPath: string = getCloudAccounts
         label TEXT,
         account_id TEXT NOT NULL,
         auth_mode TEXT,
+        workspace_id TEXT,
+        workspace_title TEXT,
+        workspace_role TEXT,
+        workspace_is_default INTEGER NOT NULL DEFAULT 0,
+        identity_key TEXT NOT NULL,
         encrypted_auth_json TEXT NOT NULL,
         snapshot_json TEXT,
         is_active INTEGER NOT NULL DEFAULT 0,
@@ -392,10 +614,12 @@ export function ensureCloudDatabaseInitialized(dbPath: string = getCloudAccounts
         last_refreshed_at INTEGER
       );
     `);
-    db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_accounts_account_id
-      ON codex_accounts(account_id);
-    `);
+    if (getCodexAccountsTableInfo(db).some((column) => column.name === 'identity_key')) {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_accounts_identity_key
+        ON codex_accounts(identity_key);
+      `);
+    }
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_codex_accounts_sort_order
       ON codex_accounts(sort_order, created_at);

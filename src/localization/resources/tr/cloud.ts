@@ -41,6 +41,7 @@ export const trCloud = {
       },
       labels: {
         accountIdPrefix: 'Hesap kimliği: {{id}}',
+        workspacePrefix: 'Çalışma alanı: {{name}}',
         plan: 'Plan',
         serviceTier: 'Servis katmanı',
         agentMode: 'Ajan modu',
@@ -76,6 +77,8 @@ export const trCloud = {
       toast: {
         addedTitle: 'Codex hesabı eklendi',
         addedDescription: 'Yeni bir ChatGPT/Codex hesabı Applyron havuzuna kaydedildi.',
+        addedBatchDescription:
+          'Consent ekranındaki {{count}} çalışma alanı ayrı Codex hesabı olarak havuza eklendi.',
         addFailedTitle: 'Codex hesabı eklenemedi',
         importedTitle: 'Codex oturumu içe aktarıldı',
         importedDescription:

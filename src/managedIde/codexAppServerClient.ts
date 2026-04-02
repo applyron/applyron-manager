@@ -85,6 +85,11 @@ interface CodexConfigReadResponse {
   } | null;
 }
 
+export interface CodexChatGptLoginStartResult {
+  authUrl: string;
+  loginId: string;
+}
+
 interface CodexLoginResponseApiKey {
   type: 'apiKey';
 }
@@ -235,6 +240,12 @@ export class CodexAppServerClient {
     openUrl: (url: string) => Promise<void> | void;
     timeoutMs?: number;
   }): Promise<void> {
+    const result = await this.startChatGptLogin();
+    await options.openUrl(result.authUrl);
+    await this.waitForChatGptLoginCompletion(result.loginId, options.timeoutMs ?? 180_000);
+  }
+
+  async startChatGptLogin(): Promise<CodexChatGptLoginStartResult> {
     await this.start();
     await this.ensureInitialized();
 
@@ -246,11 +257,13 @@ export class CodexAppServerClient {
       throw new Error(`Unexpected Codex login response type: ${result.type}`);
     }
 
-    await options.openUrl(result.authUrl);
-    await this.waitForLoginCompletion(result.loginId, options.timeoutMs ?? 180_000);
+    return {
+      authUrl: result.authUrl,
+      loginId: result.loginId,
+    };
   }
 
-  private async waitForLoginCompletion(loginId: string, timeoutMs: number): Promise<void> {
+  async waitForChatGptLoginCompletion(loginId: string, timeoutMs: number): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingLoginCompletions.delete(loginId);

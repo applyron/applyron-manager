@@ -7,7 +7,10 @@ function deleteSearchParamsByPrefix(searchParams: URLSearchParams, prefix: strin
   }
 }
 
-export function ensureFreshCodexLoginUrl(rawUrl: string): string {
+export function ensureFreshCodexLoginUrl(
+  rawUrl: string,
+  options?: { forceAccountSelection?: boolean },
+): string {
   try {
     const url = new URL(rawUrl);
     deleteSearchParamsByPrefix(url.searchParams, 'prompt');
@@ -18,11 +21,12 @@ export function ensureFreshCodexLoginUrl(rawUrl: string): string {
     const shouldForceAccountSelection =
       hostname === 'chatgpt.com' || hostname === 'chat.openai.com';
 
-    if (shouldForceAccountSelection) {
+    if (shouldForceAccountSelection && options?.forceAccountSelection !== false) {
       url.searchParams.set('prompt', 'select_account');
       url.searchParams.set('max_age', '0');
-      url.searchParams.set('applyron_login_nonce', `${Date.now()}`);
     }
+
+    url.searchParams.set('applyron_login_nonce', `${Date.now()}`);
 
     return url.toString();
   } catch {

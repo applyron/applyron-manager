@@ -115,7 +115,7 @@ export class ManagedIdeService {
     return vscodeCodexAdapter.listAccounts();
   }
 
-  static async addCodexAccount(): Promise<CodexAccountRecord> {
+  static async addCodexAccount(): Promise<CodexAccountRecord[]> {
     return vscodeCodexAdapter.addAccount();
   }
 
@@ -123,16 +123,16 @@ export class ManagedIdeService {
     return vscodeCodexAdapter.importCurrentSession();
   }
 
-  static async refreshCodexAccount(accountId: string): Promise<CodexAccountRecord> {
-    return vscodeCodexAdapter.refreshAccount(accountId);
+  static async refreshCodexAccount(id: string): Promise<CodexAccountRecord> {
+    return vscodeCodexAdapter.refreshAccount(id);
   }
 
   static async refreshAllCodexAccounts(): Promise<CodexAccountRecord[]> {
     return vscodeCodexAdapter.refreshAllAccounts();
   }
 
-  static async activateCodexAccount(accountId: string): Promise<CodexAccountRecord> {
-    const account = await vscodeCodexAdapter.activateAccount(accountId);
+  static async activateCodexAccount(id: string): Promise<CodexAccountRecord> {
+    const account = await vscodeCodexAdapter.activateAccount(id);
     const config = ConfigManager.loadConfig();
     if (config.managed_ide_target !== 'vscode-codex') {
       await ConfigManager.saveConfig({
@@ -143,8 +143,8 @@ export class ManagedIdeService {
     return account;
   }
 
-  static async deleteCodexAccount(accountId: string): Promise<void> {
-    await vscodeCodexAdapter.deleteAccount(accountId);
+  static async deleteCodexAccount(id: string): Promise<void> {
+    await vscodeCodexAdapter.deleteAccount(id);
   }
 
   static async openIde(targetId?: ManagedIdeTargetId): Promise<void> {

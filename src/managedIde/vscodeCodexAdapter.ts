@@ -7,6 +7,7 @@ import type {
   CodexAccountRecord,
   CodexAccountSnapshot,
   CodexAuthFile,
+  CodexWorkspaceSummary,
   ManagedIdeAdapter,
   ManagedIdeAvailabilityReason,
   ManagedIdeCurrentStatus,
@@ -30,9 +31,17 @@ import { CodexAccountStore } from './codexAccountStore';
 import {
   getCodexAuthFilePath,
   getCodexEmailHint,
+  getCodexWorkspaceFromAuthFile,
   readCodexAuthFile,
   writeCodexAuthFile,
 } from './codexAuth';
+import {
+  getCodexIdentityKey,
+  getCodexWorkspaceLabel,
+  isCodexPersonalWorkspace,
+  isCodexTeamPlan,
+} from './codexIdentity';
+import { getCodexChromeWorkspaceLabel } from './codexChromeWorkspaceHints';
 import { ensureFreshCodexLoginUrl } from './codexLoginUrl';
 import { openExternalWithPolicy } from '../utils/externalNavigation';
 
@@ -467,6 +476,125 @@ function getPreferredCodexEmail(
   return getCodexEmailHint(authFile) ?? fallbackEmail ?? null;
 }
 
+function getCodexDuplicateIdentityDetail(
+  authFile: CodexAuthFile,
+  fallbackEmail?: string | null,
+  planType?: string | null,
+  workspace?: CodexWorkspaceSummary | null,
+): string {
+  const email = getPreferredCodexEmail(authFile, fallbackEmail);
+  const workspaceLabel = getCodexWorkspaceLabel(
+    workspace ?? getResolvedCodexWorkspace(authFile, planType, fallbackEmail),
+  );
+
+  if (email && workspaceLabel) {
+    return `${email} (${workspaceLabel})`;
+  }
+
+  return email ?? workspaceLabel ?? authFile.tokens?.account_id ?? 'unknown';
+}
+
+function getResolvedCodexWorkspace(
+  authFile: CodexAuthFile,
+  planType?: string | null,
+  fallbackEmail?: string | null,
+): CodexWorkspaceSummary | null {
+  const derivedWorkspace = getCodexWorkspaceFromAuthFile(authFile, { planType });
+  if (!isCodexTeamPlan(planType)) {
+    return derivedWorkspace;
+  }
+
+  const workspaceHint = getCodexChromeWorkspaceLabel(
+    authFile.tokens?.account_id,
+    getPreferredCodexEmail(authFile, fallbackEmail),
+  );
+  if (!workspaceHint || isCodexPersonalWorkspace({ id: workspaceHint, title: workspaceHint })) {
+    return derivedWorkspace;
+  }
+
+  if (!derivedWorkspace) {
+    return {
+      id: authFile.tokens?.account_id ?? workspaceHint,
+      title: workspaceHint,
+      role: null,
+      isDefault: false,
+    };
+  }
+
+  if (derivedWorkspace.title === workspaceHint) {
+    return derivedWorkspace;
+  }
+
+  return {
+    ...derivedWorkspace,
+    title: workspaceHint,
+  };
+}
+
+function getWorkspaceSummaryFromSelection(input: {
+  id: string;
+  label: string;
+  derivedWorkspace?: CodexWorkspaceSummary | null;
+}): CodexWorkspaceSummary {
+  return {
+    id: input.id,
+    title: input.label,
+    role: input.derivedWorkspace?.role ?? null,
+    isDefault:
+      input.derivedWorkspace?.isDefault ??
+      isCodexPersonalWorkspace({
+        id: input.id,
+        title: input.label,
+      }),
+  };
+}
+
+function getPreferredPersistedWorkspace(input: {
+  derivedWorkspace: CodexWorkspaceSummary | null;
+  existingWorkspace?: CodexWorkspaceSummary | null;
+  selectedWorkspace?: { id: string; label: string } | null;
+}): CodexWorkspaceSummary | null {
+  if (input.selectedWorkspace) {
+    return getWorkspaceSummaryFromSelection({
+      id: input.selectedWorkspace.id,
+      label: input.selectedWorkspace.label,
+      derivedWorkspace: input.derivedWorkspace,
+    });
+  }
+
+  if (
+    input.existingWorkspace &&
+    !isCodexPersonalWorkspace(input.existingWorkspace) &&
+    (!input.derivedWorkspace ||
+      isCodexPersonalWorkspace(input.derivedWorkspace) ||
+      !input.derivedWorkspace.title)
+  ) {
+    return input.existingWorkspace;
+  }
+
+  return input.derivedWorkspace ?? input.existingWorkspace ?? null;
+}
+
+function hasCodexWorkspaceChanged(
+  currentWorkspace: CodexWorkspaceSummary | null,
+  nextWorkspace: CodexWorkspaceSummary | null,
+): boolean {
+  if (!currentWorkspace && !nextWorkspace) {
+    return false;
+  }
+
+  if (!currentWorkspace || !nextWorkspace) {
+    return true;
+  }
+
+  return (
+    currentWorkspace.id !== nextWorkspace.id ||
+    currentWorkspace.title !== nextWorkspace.title ||
+    currentWorkspace.role !== nextWorkspace.role ||
+    currentWorkspace.isDefault !== nextWorkspace.isDefault
+  );
+}
+
 function toStoredSnapshot(status: ManagedIdeCurrentStatus): CodexAccountSnapshot {
   return {
     session: status.session,
@@ -572,6 +700,13 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, status.session.email),
         accountId: authFile.tokens.account_id,
         authMode: status.session.authMode ?? authFile.auth_mode,
+        workspace: getPreferredPersistedWorkspace({
+          derivedWorkspace: getResolvedCodexWorkspace(
+            authFile,
+            status.session.planType,
+            status.session.email,
+          ),
+        }),
         authFile,
         snapshot: toStoredSnapshot(status),
         makeActive: true,
@@ -608,6 +743,13 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, preferredStatus?.session.email),
         accountId: authFile.tokens.account_id,
         authMode: preferredStatus?.session.authMode ?? authFile.auth_mode,
+        workspace: getPreferredPersistedWorkspace({
+          derivedWorkspace: getResolvedCodexWorkspace(
+            authFile,
+            preferredStatus?.session.planType,
+            preferredStatus?.session.email,
+          ),
+        }),
         authFile,
         snapshot,
         makeActive: options?.makeActive ?? true,
@@ -794,7 +936,62 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
 
   async listAccounts(): Promise<CodexAccountRecord[]> {
     try {
-      return await CodexAccountStore.listAccounts();
+      const accounts = await CodexAccountStore.listAccounts();
+      return await Promise.all(
+        accounts.map(async (account) => {
+          const planType = account.snapshot?.session.planType ?? null;
+          if (
+            !isCodexTeamPlan(planType) ||
+            (account.workspace &&
+              !isCodexPersonalWorkspace(account.workspace) &&
+              account.workspace.title)
+          ) {
+            return account;
+          }
+
+          try {
+            const authFile = await CodexAccountStore.readAuthFile(account.id, {
+              suppressExpectedSecurityLogs: true,
+            });
+            if (!authFile?.tokens?.account_id) {
+              return account;
+            }
+
+            const workspace = getPreferredPersistedWorkspace({
+              derivedWorkspace: getResolvedCodexWorkspace(authFile, planType, account.email),
+              existingWorkspace: account.workspace,
+            });
+            if (!hasCodexWorkspaceChanged(account.workspace, workspace)) {
+              return account;
+            }
+
+            try {
+              return await CodexAccountStore.upsertAccount({
+                existingId: account.id,
+                email: getPreferredCodexEmail(authFile, account.email),
+                label: account.label,
+                accountId: authFile.tokens.account_id,
+                authMode: account.authMode ?? authFile.auth_mode,
+                workspace,
+                authFile,
+                snapshot: account.snapshot,
+                makeActive: account.isActive,
+              });
+            } catch (error) {
+              logger.warn('Failed to persist reconciled Codex workspace metadata', error);
+              return {
+                ...account,
+                email: getPreferredCodexEmail(authFile, account.email),
+                authMode: account.authMode ?? authFile.auth_mode,
+                workspace,
+              };
+            }
+          } catch (error) {
+            logger.warn('Failed to reconcile stored Codex workspace metadata', error);
+            return account;
+          }
+        }),
+      );
     } catch (error) {
       if (shouldRecoverFromCodexStoreError(error)) {
         logger.warn(
@@ -824,6 +1021,13 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, status.session.email),
         accountId: authFile.tokens.account_id,
         authMode: status.session.authMode ?? authFile.auth_mode,
+        workspace: getPreferredPersistedWorkspace({
+          derivedWorkspace: getResolvedCodexWorkspace(
+            authFile,
+            status.session.planType,
+            status.session.email,
+          ),
+        }),
         authFile,
         snapshot: toStoredSnapshot(status),
         makeActive: true,
@@ -837,7 +1041,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
-  async addAccount(): Promise<CodexAccountRecord> {
+  async addAccount(): Promise<CodexAccountRecord[]> {
     const installation = await this.getInstallationStatus();
     if (!installation.available || !installation.codexCliPath) {
       throw new Error('CODEX_IDE_UNAVAILABLE');
@@ -880,9 +1084,12 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
           openUrl: async (url) => {
             await openExternalWithPolicy({
               intent: 'codex_login',
-              url: ensureFreshCodexLoginUrl(url),
+              url: ensureFreshCodexLoginUrl(url, {
+                forceAccountSelection: false,
+              }),
             });
           },
+          timeoutMs: 180_000,
         });
       } finally {
         await client.dispose();
@@ -894,22 +1101,41 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
       }
 
       const status = await this.buildStatusFromAuthFile(installation, authFile);
-      const existingAccount = await CodexAccountStore.getByAccountId(authFile.tokens.account_id);
+      const workspace = getPreferredPersistedWorkspace({
+        derivedWorkspace: getResolvedCodexWorkspace(
+          authFile,
+          status.session.planType,
+          status.session.email,
+        ),
+      });
+      const existingAccount = await CodexAccountStore.getByIdentityKey(
+        getCodexIdentityKey({
+          accountId: authFile.tokens.account_id,
+          workspace,
+        }),
+      );
       if (existingAccount) {
         throw new Error(
-          `CODEX_ACCOUNT_ALREADY_EXISTS|${getPreferredCodexEmail(authFile, status.session.email) ?? authFile.tokens.account_id}`,
+          `CODEX_ACCOUNT_ALREADY_EXISTS|${getCodexDuplicateIdentityDetail(
+            authFile,
+            status.session.email,
+            status.session.planType,
+            workspace,
+          )}`,
         );
       }
 
       try {
-        return await CodexAccountStore.upsertAccount({
+        const account = await CodexAccountStore.upsertAccount({
           email: getPreferredCodexEmail(authFile, status.session.email),
           accountId: authFile.tokens.account_id,
           authMode: status.session.authMode ?? authFile.auth_mode,
+          workspace,
           authFile,
           snapshot: toStoredSnapshot(status),
           makeActive: false,
         });
+        return [account];
       } catch (error) {
         if (shouldRecoverFromCodexStoreError(error)) {
           throw new Error('CODEX_ACCOUNT_STORE_UNAVAILABLE');
@@ -921,7 +1147,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   }
 
   async refreshAccount(
-    accountId: string,
+    id: string,
     options?: { suppressExpectedSecurityLogs?: boolean },
   ): Promise<CodexAccountRecord> {
     const installation = await this.getInstallationStatus();
@@ -930,12 +1156,12 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
 
     try {
-      const account = await CodexAccountStore.getAccount(accountId);
+      const account = await CodexAccountStore.getAccount(id);
       if (!account) {
         throw new Error('CODEX_ACCOUNT_NOT_FOUND');
       }
 
-      const authFile = await CodexAccountStore.readAuthFile(accountId, {
+      const authFile = await CodexAccountStore.readAuthFile(id, {
         suppressExpectedSecurityLogs: options?.suppressExpectedSecurityLogs,
       });
       if (!authFile?.tokens?.account_id) {
@@ -943,13 +1169,26 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
       }
 
       const status = await this.buildStatusFromAuthFile(installation, authFile);
-      await CodexAccountStore.updateSnapshot(accountId, toStoredSnapshot(status));
-      await CodexAccountStore.updateMetadata(accountId, {
+      await CodexAccountStore.upsertAccount({
+        existingId: account.id,
         email: getPreferredCodexEmail(authFile, status.session.email),
+        label: account.label,
+        accountId: authFile.tokens.account_id,
         authMode: status.session.authMode ?? authFile.auth_mode,
+        workspace: getPreferredPersistedWorkspace({
+          derivedWorkspace: getResolvedCodexWorkspace(
+            authFile,
+            status.session.planType,
+            status.session.email,
+          ),
+          existingWorkspace: account.workspace,
+        }),
+        authFile,
+        snapshot: toStoredSnapshot(status),
+        makeActive: account.isActive,
       });
 
-      const refreshed = await CodexAccountStore.getAccount(accountId);
+      const refreshed = await CodexAccountStore.getAccount(account.id);
       if (!refreshed) {
         throw new Error('CODEX_ACCOUNT_NOT_FOUND');
       }
@@ -1010,21 +1249,21 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
-  async activateAccount(accountId: string): Promise<CodexAccountRecord> {
+  async activateAccount(id: string): Promise<CodexAccountRecord> {
     try {
-      const account = await CodexAccountStore.getAccount(accountId);
+      const account = await CodexAccountStore.getAccount(id);
       if (!account) {
         throw new Error('CODEX_ACCOUNT_NOT_FOUND');
       }
 
-      const authFile = await CodexAccountStore.readAuthFile(accountId);
+      const authFile = await CodexAccountStore.readAuthFile(id);
       if (!authFile?.tokens?.account_id) {
         throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
       }
 
       const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
       writeCodexAuthFile(authFile);
-      await CodexAccountStore.setActive(accountId);
+      await CodexAccountStore.setActive(id);
 
       if (wasRunning) {
         const didReloadWindow = await reloadRunningVsCodeWindow();
@@ -1036,16 +1275,29 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
 
       try {
         const refreshedStatus = await this.getCurrentStatus({ refresh: true });
-        await CodexAccountStore.updateSnapshot(accountId, toStoredSnapshot(refreshedStatus));
-        await CodexAccountStore.updateMetadata(accountId, {
+        await CodexAccountStore.upsertAccount({
+          existingId: account.id,
           email: getPreferredCodexEmail(authFile, refreshedStatus.session.email),
+          label: account.label,
+          accountId: authFile.tokens.account_id,
           authMode: refreshedStatus.session.authMode ?? authFile.auth_mode,
+          workspace: getPreferredPersistedWorkspace({
+            derivedWorkspace: getResolvedCodexWorkspace(
+              authFile,
+              refreshedStatus.session.planType,
+              refreshedStatus.session.email,
+            ),
+            existingWorkspace: account.workspace,
+          }),
+          authFile,
+          snapshot: toStoredSnapshot(refreshedStatus),
+          makeActive: true,
         });
       } catch (error) {
         logger.warn('Failed to refresh active Codex account after activation', error);
       }
 
-      const refreshed = await CodexAccountStore.getAccount(accountId);
+      const refreshed = await CodexAccountStore.getAccount(id);
       if (!refreshed) {
         throw new Error('CODEX_ACCOUNT_NOT_FOUND');
       }
@@ -1055,9 +1307,9 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
-  async deleteAccount(accountId: string): Promise<void> {
+  async deleteAccount(id: string): Promise<void> {
     try {
-      await CodexAccountStore.removeAccount(accountId);
+      await CodexAccountStore.removeAccount(id);
     } catch (error) {
       throw toCodexAccountStoreError(error, 'CODEX_ACCOUNT_POOL_UNAVAILABLE');
     }

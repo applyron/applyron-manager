@@ -41,6 +41,7 @@ export const enCloud = {
       },
       labels: {
         accountIdPrefix: 'Account ID: {{id}}',
+        workspacePrefix: 'Workspace: {{name}}',
         plan: 'Plan',
         serviceTier: 'Service tier',
         agentMode: 'Agent mode',
@@ -76,6 +77,8 @@ export const enCloud = {
       toast: {
         addedTitle: 'Codex account added',
         addedDescription: 'A new ChatGPT/Codex account is now stored in your Applyron pool.',
+        addedBatchDescription:
+          '{{count}} workspaces from the consent screen were added as separate Codex accounts.',
         addFailedTitle: 'Failed to add Codex account',
         importedTitle: 'Codex session imported',
         importedDescription:

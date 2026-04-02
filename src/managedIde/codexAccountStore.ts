@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, or } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { openDrizzleConnection } from '../ipc/database/dbConnection';
 import {
@@ -10,8 +10,14 @@ import {
 import { codexAccounts } from '../ipc/database/schema';
 import { decrypt, encrypt } from '../utils/security';
 import { getCloudAccountsDbPath } from '../utils/paths';
+import { getCodexIdentityKey } from './codexIdentity';
 import { CodexAccountRecordSchema } from './schemas';
-import type { CodexAccountRecord, CodexAccountSnapshot, CodexAuthFile } from './types';
+import type {
+  CodexAccountRecord,
+  CodexAccountSnapshot,
+  CodexAuthFile,
+  CodexWorkspaceSummary,
+} from './types';
 
 interface PersistedCodexAccountRow {
   id: string;
@@ -19,6 +25,11 @@ interface PersistedCodexAccountRow {
   label: string | null;
   accountId: string;
   authMode: string | null;
+  workspaceId: string | null;
+  workspaceTitle: string | null;
+  workspaceRole: string | null;
+  workspaceIsDefault: number;
+  identityKey: string;
   encryptedAuthJson: string;
   snapshotJson: string | null;
   isActive: number;
@@ -85,29 +96,67 @@ function compareRowFreshness<
   return left.id.localeCompare(right.id);
 }
 
-function normalizeStoredRows<
-  T extends Pick<
+function mapWorkspaceFromRow(
+  row: Pick<
     PersistedCodexAccountRow,
-    | 'id'
-    | 'email'
-    | 'accountId'
-    | 'isActive'
-    | 'sortOrder'
-    | 'createdAt'
-    | 'updatedAt'
-    | 'lastRefreshedAt'
+    'workspaceId' | 'workspaceTitle' | 'workspaceRole' | 'workspaceIsDefault'
   >,
->(rows: T[]): T[] {
-  const preferredByAccountId = new Map<string, T>();
+): CodexWorkspaceSummary | null {
+  const workspaceId = row.workspaceId?.trim();
+  if (!workspaceId) {
+    return null;
+  }
+
+  return {
+    id: workspaceId,
+    title: row.workspaceTitle ?? null,
+    role: row.workspaceRole ?? null,
+    isDefault: row.workspaceIsDefault === 1,
+  };
+}
+
+function getRowIdentityKey(
+  row: Pick<
+    PersistedCodexAccountRow,
+    'accountId' | 'workspaceId' | 'workspaceTitle' | 'workspaceRole' | 'workspaceIsDefault'
+  > &
+    Partial<Pick<PersistedCodexAccountRow, 'identityKey'>>,
+): string {
+  const normalizedIdentityKey = row.identityKey?.trim();
+  if (normalizedIdentityKey) {
+    return normalizedIdentityKey;
+  }
+
+  return getCodexIdentityKey({
+    accountId: row.accountId,
+    workspace: mapWorkspaceFromRow({
+      workspaceId: row.workspaceId ?? null,
+      workspaceTitle: row.workspaceTitle ?? null,
+      workspaceRole: row.workspaceRole ?? null,
+      workspaceIsDefault: row.workspaceIsDefault ?? 0,
+    }),
+  });
+}
+
+function normalizeStoredRows(rows: PersistedCodexAccountRow[]): PersistedCodexAccountRow[] {
+  const preferredByIdentityKey = new Map<string, PersistedCodexAccountRow>();
 
   for (const row of rows) {
-    const existing = preferredByAccountId.get(row.accountId);
+    const normalizedRow: PersistedCodexAccountRow = {
+      ...row,
+      workspaceId: row.workspaceId ?? null,
+      workspaceTitle: row.workspaceTitle ?? null,
+      workspaceRole: row.workspaceRole ?? null,
+      workspaceIsDefault: row.workspaceIsDefault ?? 0,
+      identityKey: getRowIdentityKey(row),
+    };
+    const existing = preferredByIdentityKey.get(normalizedRow.identityKey);
     if (!existing || compareRowFreshness(row, existing) < 0) {
-      preferredByAccountId.set(row.accountId, row);
+      preferredByIdentityKey.set(normalizedRow.identityKey, normalizedRow);
     }
   }
 
-  const deduped = Array.from(preferredByAccountId.values());
+  const deduped = Array.from(preferredByIdentityKey.values());
   const activeRows = [...deduped].filter((row) => row.isActive === 1).sort(compareRowFreshness);
   const activeId = activeRows[0]?.id ?? null;
 
@@ -119,20 +168,11 @@ function normalizeStoredRows<
   );
 }
 
-function getExistingRowByAccountId<
-  T extends Pick<
-    PersistedCodexAccountRow,
-    | 'id'
-    | 'email'
-    | 'accountId'
-    | 'isActive'
-    | 'sortOrder'
-    | 'createdAt'
-    | 'updatedAt'
-    | 'lastRefreshedAt'
-  >,
->(rows: T[], accountId: string): T | null {
-  return normalizeStoredRows(rows).find((row) => row.accountId === accountId) ?? null;
+function getExistingRowByIdentityKey(
+  rows: PersistedCodexAccountRow[],
+  identityKey: string,
+): PersistedCodexAccountRow | null {
+  return normalizeStoredRows(rows).find((row) => row.identityKey === identityKey) ?? null;
 }
 
 function readFallbackRows(): PersistedCodexAccountRow[] {
@@ -227,6 +267,12 @@ function mapRowToRecord(row: CodexAccountRow): CodexAccountRecord {
     label: row.label ?? null,
     accountId: row.accountId,
     authMode: row.authMode ?? null,
+    workspace: mapWorkspaceFromRow({
+      workspaceId: row.workspaceId ?? null,
+      workspaceTitle: row.workspaceTitle ?? null,
+      workspaceRole: row.workspaceRole ?? null,
+      workspaceIsDefault: row.workspaceIsDefault ?? 0,
+    }),
     isActive: Boolean(row.isActive),
     sortOrder: row.sortOrder,
     createdAt: row.createdAt,
@@ -252,10 +298,12 @@ async function getNextSortOrder(): Promise<number> {
 }
 
 export interface UpsertCodexAccountInput {
+  existingId?: string | null;
   email: string | null;
   label?: string | null;
   accountId: string;
   authMode: string | null;
+  workspace: CodexWorkspaceSummary | null;
   authFile: CodexAuthFile;
   snapshot: CodexAccountSnapshot | null;
   makeActive?: boolean;
@@ -303,6 +351,10 @@ export class CodexAccountStore {
   }
 
   static async getByAccountId(accountId: string): Promise<CodexAccountRecord | null> {
+    return this.getByIdentityKey(getCodexIdentityKey({ accountId, workspace: null }));
+  }
+
+  static async getByIdentityKey(identityKey: string): Promise<CodexAccountRecord | null> {
     return runWithFallback(
       async () => {
         const { raw, orm } = getDb();
@@ -310,16 +362,16 @@ export class CodexAccountStore {
           const rows = orm
             .select()
             .from(codexAccounts)
-            .where(eq(codexAccounts.accountId, accountId))
+            .where(eq(codexAccounts.identityKey, identityKey))
             .all();
-          const row = getExistingRowByAccountId(rows, accountId);
+          const row = getExistingRowByIdentityKey(rows, identityKey);
           return row ? mapRowToRecord(row) : null;
         } finally {
           raw.close();
         }
       },
       async () => {
-        const row = getExistingRowByAccountId(readFallbackRows(), accountId);
+        const row = getExistingRowByIdentityKey(readFallbackRows(), identityKey);
         return row ? mapRowToRecord(row) : null;
       },
     );
@@ -387,7 +439,18 @@ export class CodexAccountStore {
   }
 
   static async upsertAccount(input: UpsertCodexAccountInput): Promise<CodexAccountRecord> {
-    const existing = await this.getByAccountId(input.accountId);
+    const identityKey = getCodexIdentityKey({
+      accountId: input.accountId,
+      workspace: input.workspace,
+    });
+    const existingByIdentity = await this.getByIdentityKey(identityKey);
+    const existingById =
+      input.existingId && (!existingByIdentity || existingByIdentity.id !== input.existingId)
+        ? await this.getAccount(input.existingId)
+        : null;
+    const existing =
+      existingByIdentity ??
+      (existingById && existingById.accountId === input.accountId ? existingById : null);
     const encryptedAuthJson = await encrypt(JSON.stringify(input.authFile));
     const now = Date.now();
     const id = existing?.id ?? uuidv4();
@@ -409,6 +472,11 @@ export class CodexAccountStore {
               label: input.label ?? existing?.label ?? null,
               accountId: input.accountId,
               authMode: input.authMode,
+              workspaceId: input.workspace?.id ?? null,
+              workspaceTitle: input.workspace?.title ?? null,
+              workspaceRole: input.workspace?.role ?? null,
+              workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
+              identityKey,
               encryptedAuthJson,
               snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
               isActive: input.makeActive ? 1 : existing?.isActive ? 1 : 0,
@@ -419,20 +487,13 @@ export class CodexAccountStore {
             };
 
             const existingRows = tx
-              .select({
-                id: codexAccounts.id,
-                email: codexAccounts.email,
-                accountId: codexAccounts.accountId,
-                isActive: codexAccounts.isActive,
-                sortOrder: codexAccounts.sortOrder,
-                createdAt: codexAccounts.createdAt,
-                updatedAt: codexAccounts.updatedAt,
-                lastRefreshedAt: codexAccounts.lastRefreshedAt,
-              })
+              .select()
               .from(codexAccounts)
-              .where(eq(codexAccounts.accountId, input.accountId))
+              .where(or(eq(codexAccounts.identityKey, identityKey), eq(codexAccounts.id, id)))
               .all();
-            const existingRow = getExistingRowByAccountId(existingRows, input.accountId);
+            const existingRow =
+              existingRows.find((row) => row.id === id) ??
+              getExistingRowByIdentityKey(existingRows, identityKey);
 
             for (const duplicateRow of existingRows) {
               if (duplicateRow.id === existingRow?.id) {
@@ -463,7 +524,8 @@ export class CodexAccountStore {
       },
       async () => {
         const rows = readFallbackRows();
-        const existingRow = getExistingRowByAccountId(rows, input.accountId);
+        const existingRow =
+          rows.find((row) => row.id === id) ?? getExistingRowByIdentityKey(rows, identityKey);
         const sortOrder = existingRow?.sortOrder ?? getNextSortOrderFromRows(rows);
 
         if (input.makeActive) {
@@ -479,6 +541,11 @@ export class CodexAccountStore {
           label: input.label ?? existingRow?.label ?? null,
           accountId: input.accountId,
           authMode: input.authMode,
+          workspaceId: input.workspace?.id ?? null,
+          workspaceTitle: input.workspace?.title ?? null,
+          workspaceRole: input.workspace?.role ?? null,
+          workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
+          identityKey,
           encryptedAuthJson,
           snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
           isActive: input.makeActive ? 1 : existingRow?.isActive ? 1 : 0,
@@ -489,7 +556,7 @@ export class CodexAccountStore {
         };
 
         const nextRows = existingRow
-          ? rows.map((row) => (row.accountId === input.accountId ? nextRow : row))
+          ? rows.map((row) => (getRowIdentityKey(row) === identityKey ? nextRow : row))
           : [...rows, nextRow];
 
         writeFallbackRows(nextRows);

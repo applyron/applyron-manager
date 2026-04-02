@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockExistsSync,
+  mockMkdirSync,
   mockReaddirSync,
   mockReadFileSync,
   mockDatabaseGet,
   mockCollectSnapshot,
-  mockLoginWithChatGpt,
+  mockStartChatGptLogin,
+  mockWaitForChatGptLoginCompletion,
   mockDispose,
   mockIsManagedIdeProcessRunning,
   mockCloseManagedIde,
@@ -24,6 +26,7 @@ const {
   mockListAccounts,
   mockGetAccount,
   mockGetByAccountId,
+  mockGetByIdentityKey,
   mockGetActiveAccount,
   mockReadStoredAuthFile,
   mockUpsertAccount,
@@ -34,17 +37,21 @@ const {
   mockReadCodexAuthFile,
   mockWriteCodexAuthFile,
   mockGetCodexEmailHint,
+  mockGetCodexWorkspaceFromAuthFile,
   mockGetCodexAuthFilePath,
+  mockGetCodexChromeWorkspaceLabel,
   mockOpenExternal,
   mockMkdtemp,
   mockRm,
 } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
+  mockMkdirSync: vi.fn(),
   mockReaddirSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockDatabaseGet: vi.fn(),
   mockCollectSnapshot: vi.fn(),
-  mockLoginWithChatGpt: vi.fn(),
+  mockStartChatGptLogin: vi.fn(),
+  mockWaitForChatGptLoginCompletion: vi.fn(),
   mockDispose: vi.fn(),
   mockIsManagedIdeProcessRunning: vi.fn(),
   mockCloseManagedIde: vi.fn(),
@@ -60,6 +67,7 @@ const {
   mockListAccounts: vi.fn(),
   mockGetAccount: vi.fn(),
   mockGetByAccountId: vi.fn(),
+  mockGetByIdentityKey: vi.fn(),
   mockGetActiveAccount: vi.fn(),
   mockReadStoredAuthFile: vi.fn(),
   mockUpsertAccount: vi.fn(),
@@ -70,7 +78,9 @@ const {
   mockReadCodexAuthFile: vi.fn(),
   mockWriteCodexAuthFile: vi.fn(),
   mockGetCodexEmailHint: vi.fn(),
+  mockGetCodexWorkspaceFromAuthFile: vi.fn(),
   mockGetCodexAuthFilePath: vi.fn(),
+  mockGetCodexChromeWorkspaceLabel: vi.fn(),
   mockOpenExternal: vi.fn(),
   mockMkdtemp: vi.fn(),
   mockRm: vi.fn(),
@@ -79,6 +89,7 @@ const {
 vi.mock('fs', () => ({
   default: {
     existsSync: mockExistsSync,
+    mkdirSync: mockMkdirSync,
     readdirSync: mockReaddirSync,
     readFileSync: mockReadFileSync,
   },
@@ -114,7 +125,15 @@ vi.mock('electron', () => ({
 vi.mock('../../managedIde/codexAppServerClient', () => ({
   CodexAppServerClient: class MockCodexAppServerClient {
     collectSnapshot = mockCollectSnapshot;
-    loginWithChatGpt = mockLoginWithChatGpt;
+    startChatGptLogin = mockStartChatGptLogin;
+    waitForChatGptLoginCompletion = mockWaitForChatGptLoginCompletion;
+    loginWithChatGpt = vi.fn(
+      async (options: { openUrl: (url: string) => Promise<void> | void; timeoutMs?: number }) => {
+        const result = await mockStartChatGptLogin();
+        await options.openUrl(result.authUrl);
+        return mockWaitForChatGptLoginCompletion(result.loginId, options.timeoutMs);
+      },
+    );
     dispose = mockDispose;
   },
 }));
@@ -151,6 +170,7 @@ vi.mock('../../managedIde/codexAccountStore', () => ({
     listAccounts: mockListAccounts,
     getAccount: mockGetAccount,
     getByAccountId: mockGetByAccountId,
+    getByIdentityKey: mockGetByIdentityKey,
     getActiveAccount: mockGetActiveAccount,
     readAuthFile: mockReadStoredAuthFile,
     upsertAccount: mockUpsertAccount,
@@ -164,8 +184,13 @@ vi.mock('../../managedIde/codexAccountStore', () => ({
 vi.mock('../../managedIde/codexAuth', () => ({
   getCodexAuthFilePath: mockGetCodexAuthFilePath,
   getCodexEmailHint: mockGetCodexEmailHint,
+  getCodexWorkspaceFromAuthFile: mockGetCodexWorkspaceFromAuthFile,
   readCodexAuthFile: mockReadCodexAuthFile,
   writeCodexAuthFile: mockWriteCodexAuthFile,
+}));
+
+vi.mock('../../managedIde/codexChromeWorkspaceHints', () => ({
+  getCodexChromeWorkspaceLabel: mockGetCodexChromeWorkspaceLabel,
 }));
 
 import { VscodeCodexAdapter } from '../../managedIde/vscodeCodexAdapter';
@@ -176,7 +201,7 @@ const codePath = 'C:\\Program Files\\Microsoft VS Code\\Code.exe';
 const codexCliPath = path.join(extensionPath, 'bin', 'windows-x86_64', 'codex.exe');
 const defaultAuthPath = 'C:\\Users\\ahmet\\.codex\\auth.json';
 const temporaryCodexHome = 'C:\\Temp\\applyron-codex-login-123';
-const temporaryAuthPath = `${temporaryCodexHome}\\auth.json`;
+const temporaryCodexAuthPath = `${temporaryCodexHome}\\auth.json`;
 
 function createLiveSnapshot(
   overrides?: Partial<{
@@ -254,6 +279,12 @@ function createAccountRecord(
     email: string | null;
     accountId: string;
     authMode: string | null;
+    workspace: {
+      id: string;
+      title: string | null;
+      role: string | null;
+      isDefault: boolean;
+    } | null;
     isActive: boolean;
     updatedAt: number;
     lastRefreshedAt: number | null;
@@ -266,6 +297,7 @@ function createAccountRecord(
     label: null,
     accountId: overrides?.accountId ?? 'acc-1',
     authMode: overrides?.authMode ?? 'chatgpt',
+    workspace: overrides?.workspace ?? null,
     isActive: overrides?.isActive ?? false,
     sortOrder: 0,
     createdAt: 1,
@@ -280,7 +312,9 @@ describe('VscodeCodexAdapter', () => {
     vi.clearAllMocks();
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
 
-    mockExistsSync.mockReturnValue(true);
+    mockExistsSync.mockImplementation(
+      (filePath: string) => !filePath.includes('Google\\Chrome\\Application\\chrome.exe'),
+    );
     mockReaddirSync.mockReturnValue([
       {
         isDirectory: () => true,
@@ -308,7 +342,11 @@ describe('VscodeCodexAdapter', () => {
       }),
     });
     mockCollectSnapshot.mockResolvedValue(createLiveSnapshot());
-    mockLoginWithChatGpt.mockResolvedValue(undefined);
+    mockStartChatGptLogin.mockResolvedValue({
+      authUrl: 'https://chatgpt.com/auth/login?flow=1',
+      loginId: 'login-1',
+    });
+    mockWaitForChatGptLoginCompletion.mockResolvedValue(undefined);
     mockDispose.mockResolvedValue(undefined);
     mockIsManagedIdeProcessRunning.mockResolvedValue(true);
     mockCloseManagedIde.mockResolvedValue(undefined);
@@ -323,6 +361,7 @@ describe('VscodeCodexAdapter', () => {
     mockListAccounts.mockResolvedValue([]);
     mockGetAccount.mockResolvedValue(null);
     mockGetByAccountId.mockResolvedValue(null);
+    mockGetByIdentityKey.mockResolvedValue(null);
     mockGetActiveAccount.mockResolvedValue(null);
     mockReadStoredAuthFile.mockResolvedValue(null);
     mockUpsertAccount.mockImplementation(async (input) =>
@@ -330,6 +369,7 @@ describe('VscodeCodexAdapter', () => {
         accountId: input.accountId,
         email: input.email,
         authMode: input.authMode,
+        workspace: input.workspace ?? null,
         isActive: Boolean(input.makeActive),
       }),
     );
@@ -341,7 +381,7 @@ describe('VscodeCodexAdapter', () => {
       if (!filePath || filePath === defaultAuthPath) {
         return createAuthFile();
       }
-      if (filePath === temporaryAuthPath) {
+      if (filePath === temporaryCodexAuthPath) {
         return createAuthFile('acc-2');
       }
       return null;
@@ -351,9 +391,10 @@ describe('VscodeCodexAdapter', () => {
       if (authFile?.tokens?.account_id === 'acc-2') {
         return 'ahmet@applyron.com';
       }
-
       return 'admin@applyron.com';
     });
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue(null);
+    mockGetCodexChromeWorkspaceLabel.mockReturnValue(null);
     mockGetCodexAuthFilePath.mockImplementation((codexHome?: string) =>
       codexHome ? `${codexHome}\\auth.json` : defaultAuthPath,
     );
@@ -471,6 +512,127 @@ describe('VscodeCodexAdapter', () => {
     expect(status.isProcessRunning).toBe(true);
   });
 
+  it('reconciles stored team workspaces from auth payloads while listing accounts', async () => {
+    const personalWorkspace = {
+      id: 'org-personal',
+      title: 'Personal',
+      role: 'owner',
+      isDefault: true,
+    };
+    const teamWorkspace = {
+      id: 'org-vszone',
+      title: 'VSZONE',
+      role: 'member',
+      isDefault: false,
+    };
+    mockListAccounts.mockResolvedValue([
+      createAccountRecord({
+        id: 'codex-team',
+        accountId: 'acc-team',
+        workspace: personalWorkspace,
+        snapshot: {
+          session: {
+            state: 'ready',
+            accountType: 'chatgpt',
+            authMode: 'chatgpt',
+            email: 'admin@applyron.com',
+            planType: 'team',
+            requiresOpenaiAuth: true,
+            serviceTier: 'flex',
+            agentMode: 'full-access',
+            lastUpdatedAt: 123,
+          },
+          quota: null,
+          quotaByLimitId: null,
+          lastUpdatedAt: 123,
+        },
+      }),
+    ]);
+    mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-team'));
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue(teamWorkspace);
+
+    const adapter = new VscodeCodexAdapter();
+    const accounts = await adapter.listAccounts();
+
+    expect(mockReadStoredAuthFile).toHaveBeenCalledWith('codex-team', {
+      suppressExpectedSecurityLogs: true,
+    });
+    expect(mockUpsertAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingId: 'codex-team',
+        accountId: 'acc-team',
+        workspace: teamWorkspace,
+      }),
+    );
+    expect(accounts[0]?.workspace).toEqual(teamWorkspace);
+  });
+
+  it('overrides personal team workspace labels with Chrome workspace hints while listing accounts', async () => {
+    const personalWorkspace = {
+      id: 'org-personal',
+      title: 'Personal',
+      role: 'owner',
+      isDefault: true,
+    };
+    mockListAccounts.mockResolvedValue([
+      createAccountRecord({
+        id: 'codex-team-hinted',
+        email: 'ahmetfarukturkogluyedek@gmail.com',
+        accountId: 'acc-team-hinted',
+        workspace: personalWorkspace,
+        snapshot: {
+          session: {
+            state: 'ready',
+            accountType: 'chatgpt',
+            authMode: 'chatgpt',
+            email: 'ahmetfarukturkogluyedek@gmail.com',
+            planType: 'team',
+            requiresOpenaiAuth: true,
+            serviceTier: 'flex',
+            agentMode: 'full-access',
+            lastUpdatedAt: 123,
+          },
+          quota: null,
+          quotaByLimitId: null,
+          lastUpdatedAt: 123,
+        },
+      }),
+    ]);
+    mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-team-hinted'));
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue(personalWorkspace);
+    mockGetCodexChromeWorkspaceLabel.mockReturnValue('VSZONE');
+    mockGetCodexEmailHint.mockImplementation((authFile) => {
+      if (authFile?.tokens?.account_id === 'acc-team-hinted') {
+        return 'ahmetfarukturkogluyedek@gmail.com';
+      }
+      if (authFile?.tokens?.account_id === 'acc-2') {
+        return 'ahmet@applyron.com';
+      }
+      return 'admin@applyron.com';
+    });
+
+    const adapter = new VscodeCodexAdapter();
+    const accounts = await adapter.listAccounts();
+
+    expect(mockGetCodexChromeWorkspaceLabel).toHaveBeenCalledWith(
+      'acc-team-hinted',
+      'ahmetfarukturkogluyedek@gmail.com',
+    );
+    expect(mockUpsertAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingId: 'codex-team-hinted',
+        accountId: 'acc-team-hinted',
+        workspace: {
+          id: 'org-personal',
+          title: 'VSZONE',
+          role: 'owner',
+          isDefault: true,
+        },
+      }),
+    );
+    expect(accounts[0]?.workspace?.title).toBe('VSZONE');
+  });
+
   it('syncs the live default Codex session into the Applyron pool as the active account', async () => {
     const adapter = new VscodeCodexAdapter();
     await adapter.getCurrentStatus({ refresh: true });
@@ -550,30 +712,41 @@ describe('VscodeCodexAdapter', () => {
   });
 
   it('adds a new Codex account through an isolated login flow', async () => {
-    mockLoginWithChatGpt.mockImplementation(async ({ openUrl }) => {
-      await openUrl('https://chatgpt.com/auth');
-    });
     mockCollectSnapshot
       .mockResolvedValueOnce(createLiveSnapshot())
       .mockResolvedValueOnce(createLiveSnapshot({ email: 'ahmet@applyron.com' }));
+    mockStartChatGptLogin.mockResolvedValueOnce({
+      authUrl: 'https://chatgpt.com/auth/login?flow=1',
+      loginId: 'login-1',
+    });
     mockUpsertAccount.mockImplementation(async (input) =>
       createAccountRecord({
         id: input.accountId === 'acc-1' ? 'codex-1' : 'codex-2',
         accountId: input.accountId,
         email: input.email,
         authMode: input.authMode,
+        workspace: input.workspace ?? null,
         isActive: Boolean(input.makeActive),
       }),
     );
+    mockWaitForChatGptLoginCompletion.mockImplementation(async (loginId: string) => {
+      expect(loginId).toBe('login-1');
+    });
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue({
+      id: 'workspace-vszone',
+      title: 'VSZONE',
+      role: null,
+      isDefault: false,
+    });
 
     const adapter = new VscodeCodexAdapter();
-    const account = await adapter.addAccount();
+    const accounts = await adapter.addAccount();
 
     expect(mockOpenExternal).toHaveBeenCalledWith(
-      expect.stringContaining('https://chatgpt.com/auth?'),
+      expect.stringMatching(
+        /^https:\/\/chatgpt\.com\/auth\/login\?flow=1&applyron_login_nonce=\d+$/,
+      ),
     );
-    expect(mockOpenExternal).toHaveBeenCalledWith(expect.stringContaining('prompt=select_account'));
-    expect(mockOpenExternal).toHaveBeenCalledWith(expect.stringContaining('max_age=0'));
     expect(mockUpsertAccount).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -587,12 +760,12 @@ describe('VscodeCodexAdapter', () => {
       expect.objectContaining({
         accountId: 'acc-2',
         email: 'ahmet@applyron.com',
-        makeActive: false,
-      }),
-    );
-    expect(mockUpsertAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        accountId: 'acc-2',
+        workspace: {
+          id: 'workspace-vszone',
+          title: 'VSZONE',
+          role: null,
+          isDefault: false,
+        },
         makeActive: false,
       }),
     );
@@ -600,18 +773,27 @@ describe('VscodeCodexAdapter', () => {
       recursive: true,
       force: true,
     });
-    expect(account.accountId).toBe('acc-2');
-    expect(account.isActive).toBe(false);
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]?.accountId).toBe('acc-2');
+    expect(accounts[0]?.workspace?.title).toBe('VSZONE');
   });
 
   it('rejects duplicate Codex account additions instead of reporting a false new account', async () => {
-    mockLoginWithChatGpt.mockImplementation(async ({ openUrl }) => {
-      await openUrl('https://chatgpt.com/auth');
-    });
     mockCollectSnapshot
       .mockResolvedValueOnce(createLiveSnapshot())
-      .mockResolvedValueOnce(createLiveSnapshot());
-    mockGetByAccountId.mockResolvedValue(
+      .mockResolvedValueOnce(createLiveSnapshot({ email: 'ahmet@applyron.com' }));
+    mockStartChatGptLogin.mockResolvedValueOnce({
+      authUrl: 'https://chatgpt.com/auth/login?flow=1',
+      loginId: 'login-1',
+    });
+    mockWaitForChatGptLoginCompletion.mockResolvedValue(undefined);
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue({
+      id: 'workspace-vszone',
+      title: 'VSZONE',
+      role: null,
+      isDefault: false,
+    });
+    mockGetByIdentityKey.mockResolvedValue(
       createAccountRecord({ id: 'codex-existing', accountId: 'acc-2', isActive: false }),
     );
 
@@ -691,12 +873,11 @@ describe('VscodeCodexAdapter', () => {
     expect(mockOpenExternal).toHaveBeenCalledWith('vscode://command/workbench.action.reloadWindow');
     expect(mockCloseManagedIde).not.toHaveBeenCalled();
     expect(mockStartManagedIde).not.toHaveBeenCalled();
-    expect(mockUpdateSnapshot).toHaveBeenCalledWith(
-      'codex-1',
+    expect(mockUpsertAccount).toHaveBeenCalledWith(
       expect.objectContaining({
-        session: expect.objectContaining({
-          email: 'admin@applyron.com',
-        }),
+        existingId: 'codex-1',
+        accountId: 'acc-1',
+        makeActive: true,
       }),
     );
     expect(result.isActive).toBe(true);

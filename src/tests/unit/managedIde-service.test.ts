@@ -140,19 +140,21 @@ describe('ManagedIdeService', () => {
         snapshot: null,
       },
     ]);
-    mockAddAccount.mockResolvedValue({
-      id: 'codex-2',
-      email: 'new@example.com',
-      label: null,
-      accountId: 'acc-2',
-      authMode: 'chatgpt',
-      isActive: false,
-      sortOrder: 1,
-      createdAt: 3,
-      updatedAt: 4,
-      lastRefreshedAt: 456,
-      snapshot: null,
-    });
+    mockAddAccount.mockResolvedValue([
+      {
+        id: 'codex-2',
+        email: 'new@example.com',
+        label: null,
+        accountId: 'acc-2',
+        authMode: 'chatgpt',
+        isActive: false,
+        sortOrder: 1,
+        createdAt: 3,
+        updatedAt: 4,
+        lastRefreshedAt: 456,
+        snapshot: null,
+      },
+    ]);
     mockImportCurrentSession.mockResolvedValue({
       id: 'codex-3',
       email: 'current@example.com',
@@ -243,7 +245,7 @@ describe('ManagedIdeService', () => {
     await ManagedIdeService.deleteCodexAccount('codex-1');
 
     expect(accounts).toHaveLength(1);
-    expect(added.email).toBe('new@example.com');
+    expect(added[0]?.email).toBe('new@example.com');
     expect(imported.email).toBe('current@example.com');
     expect(mockRefreshAccount).toHaveBeenCalledWith('codex-1');
     expect(mockRefreshAllAccounts).toHaveBeenCalledTimes(1);

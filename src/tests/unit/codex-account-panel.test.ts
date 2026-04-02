@@ -241,7 +241,7 @@ describe('CodexAccountPanel', () => {
 
     render(React.createElement(CodexAccountPanel));
 
-    expect(screen.getAllByText('standby-1@example.com')).toHaveLength(2);
+    expect(screen.getAllByText('standby-1@example.com')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Expand' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Collapse' })).toBeNull();
   });

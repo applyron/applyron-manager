@@ -56,6 +56,7 @@ function createAccount(
     label: overrides.label ?? null,
     accountId: overrides.accountId,
     authMode: overrides.authMode ?? 'chatgpt',
+    workspace: overrides.workspace ?? null,
     isActive: overrides.isActive ?? false,
     sortOrder: overrides.sortOrder ?? 0,
     createdAt,

@@ -9,6 +9,7 @@ import {
   SquareTerminal,
 } from 'lucide-react';
 import { getCodexHealthState } from '@/managedIde/codexHealth';
+import { getCodexAccountDisplayIdentity, getCodexWorkspaceLabel } from '@/managedIde/codexIdentity';
 import { getCodexRemainingRequestPercent } from '@/managedIde/codexMetadata';
 import type { CodexAccountRecord } from '@/managedIde/types';
 import type { CloudAccount } from '@/types/cloudAccount';
@@ -217,13 +218,24 @@ export function buildCodexAccountSummary(
       : healthState === 'limited'
         ? t('cloud.codex.health.limited')
         : t('cloud.codex.health.attention');
+  const primaryIdentity = getCodexAccountDisplayIdentity({
+    ...account,
+    planType: account.snapshot?.session.planType,
+  });
+  const workspaceLabel = getCodexWorkspaceLabel(account.workspace);
+  const secondaryIdentity =
+    account.email?.trim() && account.email.trim() !== primaryIdentity
+      ? account.email.trim()
+      : workspaceLabel && workspaceLabel !== primaryIdentity
+        ? workspaceLabel
+        : null;
 
   return {
     key: `codex:${account.id}`,
     source: 'codex',
     sourceLabel: t('dashboard.activeAccounts.sources.codex'),
-    name: account.label?.trim() || account.email || t('managedIde.empty.noAccount'),
-    secondary: account.email || account.accountId,
+    name: primaryIdentity || t('managedIde.empty.noAccount'),
+    secondary: secondaryIdentity ?? account.accountId,
     status,
     summary:
       summaryParts.length > 0

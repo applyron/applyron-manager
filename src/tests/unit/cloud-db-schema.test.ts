@@ -51,6 +51,12 @@ describe('ensureCloudDatabaseInitialized', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExistsSync.mockReturnValue(true);
+    mockPragma.mockImplementation((value: string) => {
+      if (value === 'table_info(codex_accounts)') {
+        return [{ name: 'identity_key' }];
+      }
+      return [];
+    });
     mockPrepare.mockReturnValue({
       all: () => [],
       run: () => ({ changes: 1 }),
@@ -67,7 +73,7 @@ describe('ensureCloudDatabaseInitialized', () => {
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS settings');
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS codex_accounts');
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS schema_migrations');
-    expect(executedSql).toContain('idx_codex_accounts_account_id');
+    expect(executedSql).toContain('idx_codex_accounts_identity_key');
     expect(executedSql).toContain('idx_codex_accounts_sort_order');
     expect(mockClose).toHaveBeenCalledTimes(1);
   });

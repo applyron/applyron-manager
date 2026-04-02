@@ -1,3 +1,6 @@
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { shell } from 'electron';
 
 export const EXTERNAL_NAVIGATION_INTENTS = [
@@ -24,6 +27,44 @@ const CODEX_LOGIN_ALLOWED_HOSTS = new Set([
   'openai.com',
   'platform.openai.com',
 ]);
+
+function getChromeExecutablePath(): string | null {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  const candidates = [
+    process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      : null,
+    process.env.PROGRAMFILES
+      ? path.join(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      : null,
+    process.env['PROGRAMFILES(X86)']
+      ? path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe')
+      : null,
+    process.env.PROGRAMW6432
+      ? path.join(process.env.PROGRAMW6432, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      : null,
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+async function openCodexLoginUrl(url: string): Promise<void> {
+  const chromeExecutablePath = getChromeExecutablePath();
+  if (chromeExecutablePath) {
+    const child = spawn(chromeExecutablePath, [url], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return;
+  }
+
+  await shell.openExternal(url);
+}
 
 function parseUrl(rawUrl: string): URL {
   try {
@@ -76,5 +117,11 @@ export async function openExternalWithPolicy(input: {
   intent: ExternalNavigationIntent;
   url: string;
 }): Promise<void> {
-  await shell.openExternal(normalizeExternalNavigationUrl(input.intent, input.url));
+  const normalizedUrl = normalizeExternalNavigationUrl(input.intent, input.url);
+  if (input.intent === 'codex_login') {
+    await openCodexLoginUrl(normalizedUrl);
+    return;
+  }
+
+  await shell.openExternal(normalizedUrl);
 }
