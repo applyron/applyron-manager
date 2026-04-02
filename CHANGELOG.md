@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [1.0.2](https://github.com/applyron/applyron-manager/compare/v1.0.1...v1.0.2) (2026-04-02)
+
+### 🐛 Bug Fixes
+
+* make codex login Chrome detection deterministic in ci ([597c3d6](https://github.com/applyron/applyron-manager/commit/597c3d66aeb9dbd26a817ded7dae00304ee78377))
+* resolve codex workspace labeling and Chrome hint reconciliation ([aa64c15](https://github.com/applyron/applyron-manager/commit/aa64c1576677d14279663140299d1d38fd6d8034))
+
 ## [1.0.1](https://github.com/applyron/applyron-manager/compare/v1.0.0...v1.0.1) (2026-04-01)
 
 ### 🐛 Bug Fixes
