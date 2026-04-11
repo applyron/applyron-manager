@@ -27,6 +27,7 @@ export const codexAccounts = sqliteTable('codex_accounts', {
   label: text('label'),
   accountId: text('account_id').notNull(),
   authMode: text('auth_mode'),
+  hydrationState: text('hydration_state').notNull().default('live'),
   workspaceId: text('workspace_id'),
   workspaceTitle: text('workspace_title'),
   workspaceRole: text('workspace_role'),

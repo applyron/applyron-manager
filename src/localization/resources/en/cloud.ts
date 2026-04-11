@@ -22,6 +22,10 @@ export const enCloud = {
     codex: {
       description:
         'Manage your Codex account pool and switch the active VS Code Codex session from Applyron Manager.',
+      badges: {
+        runtimeMismatch: 'Runtime mismatch',
+        runtimeSelectionNeeded: 'Runtime selection needed',
+      },
       source: 'Source',
       remainingRequests: 'Remaining request limit',
       accountCardDescription:
@@ -53,6 +57,16 @@ export const enCloud = {
         refreshAll: 'Refresh All',
         importCurrent: 'Import Current Session',
         activate: 'Activate',
+        syncRuntime: 'WSL Sync',
+      },
+      runtime: {
+        activeRuntime: 'Active runtime: {{name}}',
+        selectionTitle: 'Choose which runtime should receive Codex account actions.',
+        selectionDescription:
+          'Windows Local and WSL Remote are both available, but the active VS Code side could not be detected automatically.',
+        useWindowsLocal: 'Use Windows Local',
+        useWslRemote: 'Use WSL Remote',
+        stateSummary: '{{name}} · {{state}}',
       },
       confirmDelete: 'Remove {{target}} from the Codex pool?',
       windows: {
@@ -93,6 +107,11 @@ export const enCloud = {
         loginRequiredTitle: 'Codex sign-in required',
         loginRequiredDescription:
           'Open VS Code and sign in from the official OpenAI extension, then try again.',
+        runtimeSyncTitle: 'WSL runtime sync completed',
+        runtimeSyncDescription: '{{source}} -> {{target}}',
+        runtimeSyncFailedTitle: 'WSL runtime sync failed',
+        runtimeSyncWarningTitle: 'WSL runtime sync completed with warnings',
+        runtimeSyncWarningDescription: '{{source}} -> {{target}}. {{warnings}}',
       },
     },
     stats: {
@@ -205,6 +224,17 @@ export const enCloud = {
       codexLoginFailed: 'Codex sign-in could not be completed. Please try the login flow again.',
       codexDeleteActiveBlocked:
         'The active Codex account cannot be deleted. Activate another account first.',
+      codexRuntimeSelectionRequired:
+        'Choose the active Codex runtime first, then try the action again.',
+      codexRuntimeSyncUnavailable:
+        'WSL sync is only available when both Windows Local and WSL Remote runtimes are installed.',
+      codexRuntimeSyncAuthFailed: 'The target runtime auth file could not be updated.',
+      codexRuntimeSyncStateFailed:
+        'The target runtime OpenAI extension state could not be updated.',
+      codexRuntimeSyncAuthSkipped:
+        'Auth data was skipped because the source or target auth file was missing.',
+      codexRuntimeSyncStateSkipped:
+        'Extension state was skipped because the source or target state database was missing.',
       switch: {
         closeFailed: 'The managed IDE could not be closed before switching accounts.',
         processExitTimeout:

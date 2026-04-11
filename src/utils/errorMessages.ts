@@ -32,6 +32,12 @@ const CODEX_ERROR_I18N_MAP: Record<string, string> = {
   CODEX_LOGIN_TIMEOUT: 'cloud.errors.codexLoginTimeout',
   CODEX_LOGIN_FAILED: 'cloud.errors.codexLoginFailed',
   ACTIVE_CODEX_ACCOUNT_DELETE_BLOCKED: 'cloud.errors.codexDeleteActiveBlocked',
+  CODEX_RUNTIME_SELECTION_REQUIRED: 'cloud.errors.codexRuntimeSelectionRequired',
+  CODEX_RUNTIME_SYNC_UNAVAILABLE: 'cloud.errors.codexRuntimeSyncUnavailable',
+  CODEX_RUNTIME_SYNC_AUTH_FAILED: 'cloud.errors.codexRuntimeSyncAuthFailed',
+  CODEX_RUNTIME_SYNC_STATE_FAILED: 'cloud.errors.codexRuntimeSyncStateFailed',
+  CODEX_RUNTIME_SYNC_AUTH_SKIPPED: 'cloud.errors.codexRuntimeSyncAuthSkipped',
+  CODEX_RUNTIME_SYNC_STATE_SKIPPED: 'cloud.errors.codexRuntimeSyncStateSkipped',
 };
 
 type TranslateFn = {

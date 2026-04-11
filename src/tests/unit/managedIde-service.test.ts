@@ -9,13 +9,16 @@ const {
   mockRefreshAccount,
   mockRefreshAllAccounts,
   mockActivateAccount,
+  mockRestoreImportedAccount,
   mockDeleteAccount,
+  mockSyncRuntimeState,
   mockOpenIde,
   mockOpenLoginGuidance,
   mockLoadConfig,
   mockSaveConfig,
   mockIsManagedIdeProcessRunning,
   mockGetManagedIdeExecutablePath,
+  mockIsWsl,
 } = vi.hoisted(() => ({
   mockGetInstallationStatus: vi.fn(),
   mockGetCurrentStatus: vi.fn(),
@@ -25,13 +28,16 @@ const {
   mockRefreshAccount: vi.fn(),
   mockRefreshAllAccounts: vi.fn(),
   mockActivateAccount: vi.fn(),
+  mockRestoreImportedAccount: vi.fn(),
   mockDeleteAccount: vi.fn(),
+  mockSyncRuntimeState: vi.fn(),
   mockOpenIde: vi.fn(),
   mockOpenLoginGuidance: vi.fn(),
   mockLoadConfig: vi.fn(),
   mockSaveConfig: vi.fn(),
   mockIsManagedIdeProcessRunning: vi.fn(),
   mockGetManagedIdeExecutablePath: vi.fn(),
+  mockIsWsl: vi.fn(),
 }));
 
 vi.mock('../../ipc/config/manager', () => ({
@@ -47,6 +53,7 @@ vi.mock('../../ipc/process/handler', () => ({
 
 vi.mock('../../utils/paths', () => ({
   getManagedIdeExecutablePath: mockGetManagedIdeExecutablePath,
+  isWsl: mockIsWsl,
 }));
 
 vi.mock('../../managedIde/vscodeCodexAdapter', () => ({
@@ -59,7 +66,9 @@ vi.mock('../../managedIde/vscodeCodexAdapter', () => ({
     refreshAccount = mockRefreshAccount;
     refreshAllAccounts = mockRefreshAllAccounts;
     activateAccount = mockActivateAccount;
+    restoreImportedAccount = mockRestoreImportedAccount;
     deleteAccount = mockDeleteAccount;
+    syncRuntimeState = mockSyncRuntimeState;
     openIde = mockOpenIde;
     openLoginGuidance = mockOpenLoginGuidance;
   },
@@ -75,6 +84,7 @@ describe('ManagedIdeService', () => {
     mockLoadConfig.mockReturnValue({ managed_ide_target: 'vscode-codex' });
     mockSaveConfig.mockResolvedValue(undefined);
     mockIsManagedIdeProcessRunning.mockResolvedValue(false);
+    mockIsWsl.mockReturnValue(false);
     mockGetManagedIdeExecutablePath.mockImplementation((targetId: string) =>
       targetId === 'antigravity'
         ? 'C:\\Antigravity\\Antigravity.exe'
@@ -124,6 +134,10 @@ describe('ManagedIdeService', () => {
       isProcessRunning: true,
       lastUpdatedAt: 123,
       fromCache: false,
+      activeRuntimeId: 'windows-local',
+      requiresRuntimeSelection: false,
+      hasRuntimeMismatch: false,
+      runtimes: [],
     });
     mockListAccounts.mockResolvedValue([
       {
@@ -195,7 +209,21 @@ describe('ManagedIdeService', () => {
       lastRefreshedAt: 1000,
       snapshot: null,
     });
+    mockRestoreImportedAccount.mockResolvedValue({
+      restoredAccountId: 'codex-1',
+      appliedRuntimeId: 'windows-local',
+      didRestartIde: true,
+      status: 'applied',
+      warnings: [],
+    });
     mockDeleteAccount.mockResolvedValue(undefined);
+    mockSyncRuntimeState.mockResolvedValue({
+      sourceRuntimeId: 'windows-local',
+      targetRuntimeId: 'wsl-remote',
+      syncedAuthFile: true,
+      syncedExtensionState: true,
+      warnings: [],
+    });
   });
 
   it('lists Antigravity and Codex targets on Windows', async () => {
@@ -204,6 +232,15 @@ describe('ManagedIdeService', () => {
     expect(targets.map((target) => target.id)).toEqual(['antigravity', 'vscode-codex']);
     expect(targets[0]?.displayName).toBe('Antigravity');
     expect(targets[1]?.installation.extensionId).toBe('openai.chatgpt');
+  });
+
+  it('keeps VS Code Codex visible under WSL', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    mockIsWsl.mockReturnValue(true);
+
+    const targets = await ManagedIdeService.listTargets();
+
+    expect(targets.map((target) => target.id)).toEqual(['antigravity', 'vscode-codex']);
   });
 
   it('reads current target status from the Codex adapter', async () => {
@@ -250,6 +287,20 @@ describe('ManagedIdeService', () => {
     expect(mockRefreshAccount).toHaveBeenCalledWith('codex-1');
     expect(mockRefreshAllAccounts).toHaveBeenCalledTimes(1);
     expect(mockDeleteAccount).toHaveBeenCalledWith('codex-1');
+  });
+
+  it('delegates runtime sync to the adapter', async () => {
+    const result = await ManagedIdeService.syncCodexRuntimeState();
+
+    expect(mockSyncRuntimeState).toHaveBeenCalledTimes(1);
+    expect(result.targetRuntimeId).toBe('wsl-remote');
+  });
+
+  it('delegates imported Codex account restore to the adapter', async () => {
+    const result = await ManagedIdeService.restoreImportedCodexAccount('codex-1');
+
+    expect(mockRestoreImportedAccount).toHaveBeenCalledWith('codex-1');
+    expect(result.status).toBe('applied');
   });
 
   it('activates a Codex account and persists vscode-codex as the managed target', async () => {

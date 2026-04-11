@@ -12,11 +12,13 @@ const mockUseRefreshAllCodexAccounts = vi.fn();
 const mockUseRefreshCodexAccount = vi.fn();
 const mockUseActivateCodexAccount = vi.fn();
 const mockUseDeleteCodexAccount = vi.fn();
+const mockUseSyncCodexRuntimeState = vi.fn();
 const mockToast = vi.fn();
 const mockSaveConfig = vi.fn();
 const mockConfig = {
   codex_auto_switch_enabled: false,
   grid_layout: '2-col',
+  codex_runtime_override: null,
 };
 
 vi.mock('@/hooks/useManagedIde', () => ({
@@ -28,6 +30,7 @@ vi.mock('@/hooks/useManagedIde', () => ({
   useRefreshCodexAccount: () => mockUseRefreshCodexAccount(),
   useActivateCodexAccount: () => mockUseActivateCodexAccount(),
   useDeleteCodexAccount: () => mockUseDeleteCodexAccount(),
+  useSyncCodexRuntimeState: () => mockUseSyncCodexRuntimeState(),
 }));
 
 vi.mock('@/hooks/useAppConfig', () => ({
@@ -63,6 +66,7 @@ vi.mock('react-i18next', () => ({
         'cloud.addAccount': 'Add Account',
         'cloud.codex.actions.importCurrent': 'Import Current Session',
         'cloud.codex.actions.refreshAll': 'Refresh All',
+        'cloud.codex.actions.syncRuntime': 'WSL Sync',
         'cloud.codex.confirmDelete': 'Remove {{target}} from the Codex pool?',
         'cloud.codex.actions.activate': 'Activate',
         'cloud.codex.emptyTitle': 'No Codex account added yet',
@@ -78,9 +82,20 @@ vi.mock('react-i18next', () => ({
         'managedIde.empty.unavailable': 'Unavailable',
         'managedIde.empty.noAccount': 'No account',
         'managedIde.session.ready': 'Ready',
+        'managedIde.session.requires_login': 'Sign-in required',
         'cloud.codex.health.ready': 'Healthy',
         'cloud.codex.health.limited': 'Limited',
         'cloud.codex.health.attention': 'Needs attention',
+        'cloud.codex.badges.runtimeMismatch': 'Runtime mismatch',
+        'cloud.codex.badges.runtimeSelectionNeeded': 'Runtime selection needed',
+        'cloud.codex.runtime.activeRuntime': 'Active runtime: {{name}}',
+        'cloud.codex.runtime.selectionTitle':
+          'Choose which runtime should receive Codex account actions.',
+        'cloud.codex.runtime.selectionDescription':
+          'Windows Local and WSL Remote are both available, but the active VS Code side could not be detected automatically.',
+        'cloud.codex.runtime.useWindowsLocal': 'Use Windows Local',
+        'cloud.codex.runtime.useWslRemote': 'Use WSL Remote',
+        'cloud.codex.runtime.stateSummary': '{{name}} · {{state}}',
         'cloud.codex.labels.plan': 'Plan',
         'cloud.codex.labels.status': 'Status',
         'cloud.codex.labels.primaryQuota': 'Primary window',
@@ -89,10 +104,20 @@ vi.mock('react-i18next', () => ({
         'cloud.codex.windows.fiveHours': '5-hour window',
         'cloud.codex.windows.weekly': 'Weekly window',
         'cloud.codex.windows.generic': 'Request window',
+        'cloud.codex.toast.runtimeSyncTitle': 'WSL runtime sync completed',
+        'cloud.codex.toast.runtimeSyncDescription': '{{source}} -> {{target}}',
+        'cloud.codex.toast.runtimeSyncFailedTitle': 'WSL runtime sync failed',
+        'cloud.codex.toast.runtimeSyncWarningTitle': 'WSL runtime sync completed with warnings',
+        'cloud.codex.toast.runtimeSyncWarningDescription': '{{source}} -> {{target}}. {{warnings}}',
         'a11y.expand': 'Expand',
         'a11y.collapse': 'Collapse',
         'a11y.selectAccount': 'Select {{target}}',
         'cloud.errors.codexDeleteActiveBlocked': 'Active account cannot be deleted',
+        'cloud.errors.codexRuntimeSelectionRequired':
+          'Choose the active Codex runtime first, then try the action again.',
+        'managedIde.labels.activeRuntime': 'Active runtime',
+        'managedIde.runtimes.windowsLocal': 'Windows Local',
+        'managedIde.runtimes.wslRemote': 'WSL Remote',
       };
 
       let template = translations[key] ?? key;
@@ -159,6 +184,7 @@ describe('CodexAccountPanel', () => {
     mockSaveConfig.mockResolvedValue(undefined);
     mockConfig.codex_auto_switch_enabled = false;
     mockConfig.grid_layout = '2-col';
+    mockConfig.codex_runtime_override = null;
 
     mockUseManagedIdeStatus.mockReturnValue({
       isLoading: false,
@@ -175,6 +201,16 @@ describe('CodexAccountPanel', () => {
         session: {
           state: 'ready',
         },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+        ],
       },
     });
     mockUseCodexAccounts.mockReturnValue({
@@ -190,6 +226,7 @@ describe('CodexAccountPanel', () => {
     mockUseRefreshCodexAccount.mockReturnValue(createIdleMutation());
     mockUseActivateCodexAccount.mockReturnValue(createIdleMutation());
     mockUseDeleteCodexAccount.mockReturnValue(createIdleMutation());
+    mockUseSyncCodexRuntimeState.mockReturnValue(createIdleMutation());
   });
 
   it('uses a fixed 5 minute refresh cadence for Codex status polling', () => {
@@ -206,6 +243,7 @@ describe('CodexAccountPanel', () => {
     render(React.createElement(CodexAccountPanel));
 
     expect(screen.getByText('Auto-Switch')).toBeTruthy();
+    expect(screen.getByText('Active runtime: Windows Local')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Select All' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Refresh All/ })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Add New Account' })).toHaveLength(2);
@@ -213,6 +251,134 @@ describe('CodexAccountPanel', () => {
     expect(screen.getByRole('button', { name: 'List Layout' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open VS Code' })).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Import Current Session' })).toHaveLength(1);
+  });
+
+  it('shows runtime mismatch and sync controls when both runtimes are available', () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: true,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+          {
+            id: 'wsl-remote',
+            installation: { available: true },
+            session: { state: 'requires_login' },
+          },
+        ],
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    expect(screen.getByText('Runtime mismatch')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'WSL Sync' })).toBeTruthy();
+  });
+
+  it('renders runtime selection buttons when the active side is ambiguous', () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: null,
+        requiresRuntimeSelection: true,
+        hasRuntimeMismatch: false,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+          {
+            id: 'wsl-remote',
+            installation: { available: true },
+            session: { state: 'requires_login' },
+          },
+        ],
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    expect(screen.getByTestId('codex-runtime-selection')).toBeTruthy();
+    expect(screen.getByText('Runtime selection needed')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Use Windows Local/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Use WSL Remote/i })).toBeTruthy();
+  });
+
+  it('stores the selected runtime override when the user resolves ambiguity', () => {
+    const refetch = vi.fn();
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch,
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: null,
+        requiresRuntimeSelection: true,
+        hasRuntimeMismatch: false,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+          {
+            id: 'wsl-remote',
+            installation: { available: true },
+            session: { state: 'requires_login' },
+          },
+        ],
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    fireEvent.click(screen.getByRole('button', { name: /Use Windows Local/i }));
+
+    expect(mockSaveConfig).toHaveBeenCalledWith({
+      codex_auto_switch_enabled: false,
+      grid_layout: '2-col',
+      codex_runtime_override: 'windows-local',
+    });
   });
 
   it('selects only deletable inactive accounts for batch delete', () => {

@@ -22,6 +22,10 @@ export const trCloud = {
     codex: {
       description:
         'Codex hesap havuzunuzu yönetin ve etkin VS Code Codex oturumunu Applyron Manager içinden değiştirin.',
+      badges: {
+        runtimeMismatch: 'Runtime uyumsuzluğu',
+        runtimeSelectionNeeded: 'Runtime seçimi gerekli',
+      },
       source: 'Kaynak',
       remainingRequests: 'Kalan istek limiti',
       accountCardDescription:
@@ -53,6 +57,16 @@ export const trCloud = {
         refreshAll: 'Tümünü yenile',
         importCurrent: 'Mevcut oturumu içe aktar',
         activate: 'Etkin yap',
+        syncRuntime: 'WSL Sync',
+      },
+      runtime: {
+        activeRuntime: 'Etkin runtime: {{name}}',
+        selectionTitle: 'Codex hesap işlemlerinin hangi runtime tarafına gideceğini seçin.',
+        selectionDescription:
+          'Windows Local ve WSL Remote birlikte hazır, ancak etkin VS Code tarafı otomatik olarak net tespit edilemedi.',
+        useWindowsLocal: 'Windows Local kullan',
+        useWslRemote: 'WSL Remote kullan',
+        stateSummary: '{{name}} · {{state}}',
       },
       confirmDelete: '{{target}} hesabı Codex havuzundan kaldırılsın mı?',
       windows: {
@@ -93,6 +107,11 @@ export const trCloud = {
         loginRequiredTitle: 'Codex girişi gerekli',
         loginRequiredDescription:
           "Önce VS Code'u açıp resmi OpenAI eklentisinden giriş yapın, ardından tekrar deneyin.",
+        runtimeSyncTitle: 'WSL runtime senkronu tamamlandı',
+        runtimeSyncDescription: '{{source}} -> {{target}}',
+        runtimeSyncFailedTitle: 'WSL runtime senkronu başarısız oldu',
+        runtimeSyncWarningTitle: 'WSL runtime senkronu uyarılarla tamamlandı',
+        runtimeSyncWarningDescription: '{{source}} -> {{target}}. {{warnings}}',
       },
     },
     stats: {
@@ -204,6 +223,18 @@ export const trCloud = {
       codexLoginFailed: 'Codex girişi tamamlanamadı. Lütfen giriş akışını yeniden deneyin.',
       codexDeleteActiveBlocked:
         'Etkin Codex hesabı silinemez. Önce başka bir hesabı etkinleştirin.',
+      codexRuntimeSelectionRequired:
+        'Önce etkin Codex runtime tarafını seçin, ardından işlemi tekrar deneyin.',
+      codexRuntimeSyncUnavailable:
+        'WSL sync yalnızca Windows Local ve WSL Remote runtime birlikte kuruluysa kullanılabilir.',
+      codexRuntimeSyncAuthFailed:
+        'Hedef runtime tarafındaki auth dosyası güncellenemedi.',
+      codexRuntimeSyncStateFailed:
+        'Hedef runtime tarafındaki OpenAI uzantı durumu güncellenemedi.',
+      codexRuntimeSyncAuthSkipped:
+        'Kaynak veya hedef auth dosyası eksik olduğu için auth verisi atlandı.',
+      codexRuntimeSyncStateSkipped:
+        'Kaynak veya hedef state veritabanı eksik olduğu için uzantı durumu atlandı.',
       switch: {
         closeFailed: 'Hesap değişiminden önce yönetilen IDE güvenli şekilde kapatılamadı.',
         processExitTimeout: 'Yönetilen IDE zamanında kapanmadığı için hesap değişimi iptal edildi.',

@@ -1,6 +1,7 @@
 import { ipc } from '@/ipc/manager';
 import type {
   CodexAccountRecord,
+  CodexRuntimeSyncResult,
   ManagedIdeCurrentStatus,
   ManagedIdeRuntimeTarget,
   ManagedIdeTargetId,
@@ -63,4 +64,8 @@ export function activateCodexAccount(id: string): Promise<CodexAccountRecord> {
 
 export function deleteCodexAccount(id: string): Promise<void> {
   return ipc.client.managedIde.deleteCodexAccount({ id });
+}
+
+export function syncCodexRuntimeState(): Promise<CodexRuntimeSyncResult> {
+  return ipc.client.managedIde.syncCodexRuntimeState();
 }

@@ -2,6 +2,17 @@
 
 # Changelog
 
+## [1.0.3](https://github.com/applyron/applyron-manager/compare/v1.0.2...v1.0.3) (2026-04-11)
+
+### 🚀 Features
+
+* ship Windows Local + Remote-WSL runtime support for VS Code Codex
+
+### 🐛 Bug Fixes
+
+* restore the active Codex account into the live runtime after portable imports
+* hard-apply imported Codex accounts the first time they are activated on a new machine
+
 ## [1.0.2](https://github.com/applyron/applyron-manager/compare/v1.0.1...v1.0.2) (2026-04-02)
 
 ### 🐛 Bug Fixes

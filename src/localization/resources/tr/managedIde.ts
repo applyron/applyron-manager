@@ -1,7 +1,8 @@
 export const trManagedIde = {
   managedIde: {
     title: 'VS Code Codex',
-    description: 'Resmi OpenAI VS Code uzantısını ve canlı Codex oturum durumunu izleyin.',
+    description:
+      'Resmi OpenAI VS Code uzantısı üzerinden Windows Local ve Remote-WSL Codex runtime durumlarını izleyin.',
     badges: {
       cached: 'Önbellek',
       running: 'Çalışıyor',
@@ -13,7 +14,8 @@ export const trManagedIde = {
     },
     availability: {
       ready: 'Hazır',
-      unsupported_platform: 'Bu entegrasyon yalnızca Windows üzerinde kullanılabilir.',
+      unsupported_platform:
+        'Bu entegrasyon Windows üzerinde ve Windows VS Code ile eşleşen WSL ortamında kullanılabilir.',
       ide_not_found: 'VS Code stable kurulumu bulunamadı.',
       extension_not_found: 'Resmi OpenAI VS Code uzantısı bulunamadı.',
       codex_cli_not_found: 'Paketlenmiş Codex CLI bulunamadı.',
@@ -51,6 +53,7 @@ export const trManagedIde = {
       extensionPath: 'Uzantı yolu',
       accountType: 'Hesap türü',
       authMode: 'Kimlik doğrulama modu',
+      activeRuntime: 'Etkin runtime',
       requiresOpenaiAuth: 'OpenAI kimlik doğrulaması gerekli',
       primaryWindow: 'Birincil pencere',
       secondaryWindow: 'İkincil pencere',
@@ -58,6 +61,10 @@ export const trManagedIde = {
       limitName: 'Etkin limit',
       resetsAt: 'Sıfırlanma zamanı',
       additionalLimits: 'Ek limitler',
+    },
+    runtimes: {
+      windowsLocal: 'Windows Local',
+      wslRemote: 'WSL Remote',
     },
     empty: {
       noAccount: 'Giriş yapılmış bir hesap tespit edilmedi',

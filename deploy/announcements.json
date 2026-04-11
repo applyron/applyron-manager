@@ -1,3 +1,18 @@
 {
-  "announcements": []
+  "announcements": [
+    {
+      "id": "release-2026-04-11-v1-0-3",
+      "publishedAt": "2026-04-11T12:00:00Z",
+      "level": "success",
+      "url": "https://github.com/applyron/applyron-manager/releases/tag/v1.0.3",
+      "title": {
+        "tr": "1.0.3 yayımlandı",
+        "en": "1.0.3 is live"
+      },
+      "body": {
+        "tr": "VS Code Codex için Windows Local + Remote-WSL akışı artık resmî olarak destekleniyor. Taşınabilir içe aktarma sonrasında etkin Codex hesabı yeniden canlı runtime tarafına uygulanabiliyor. Yayımlanan release dağıtımı artık Windows asset'lerine odaklanıyor.",
+        "en": "Windows Local + Remote-WSL support for VS Code Codex is now official. Portable imports can restore the active Codex account back into the live runtime, and published release distribution is now focused on Windows assets."
+      }
+    }
+  ]
 }

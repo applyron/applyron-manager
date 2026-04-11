@@ -39,7 +39,7 @@ export const trSettings = {
       import: {
         title: 'Taşınabilir Paket İçe Al',
         description:
-          'Önce paketi önizleyin, sonra etkin çalışma zamanı seçimini değiştirmeden merge import uygulayın.',
+          'Önce paketi önizleyin, sonra merge import uygulayın. Paket etkin bir Codex hesabı içeriyorsa Applyron mümkün olduğunda bunu seçili runtime tarafına geri yükler.',
         sourceFile: 'Kaynak dosya',
         password: 'İçe aktarma parolası',
         passwordPlaceholder: 'Paket parolasını girin',
@@ -59,6 +59,15 @@ export const trSettings = {
           'Seçilen dosyanın şifresi çözülemedi. Parolayı ve dışa aktarma dosyasını doğrulayın.',
         previewExpired:
           'İçe aktarma önizlemesinin süresi doldu. Dosyayı yeniden açıp tekrar önizleyin.',
+        restoreApplied: 'Etkin Codex hesabı {{runtime}} tarafına geri yüklendi.',
+        restoreStoredOnlyRuntimeSelectionRequired:
+          'Etkin Codex hesabı havuza aktarıldı, ancak canlı geri yükleme için önce bir Codex runtime tarafı seçmeniz gerekiyor.',
+        restoreStoredOnlyRuntimeUnavailable:
+          'Etkin Codex hesabı havuza aktarıldı, ancak bu cihazda uygun bir Codex runtime bulunamadığı için canlı geri yükleme yapılamadı.',
+        restoreSkippedNoActiveCodex:
+          'Paket içinde geri yüklenecek etkin bir Codex hesabı işaretlenmemişti.',
+        restoreWarningMultipleActive:
+          'Paket içinde birden fazla etkin Codex kaydı bulunduğu için en güncel olan seçildi.',
       },
       activity: {
         title: 'Aktivite Günlüğü',

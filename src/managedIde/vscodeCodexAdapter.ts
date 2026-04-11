@@ -2,14 +2,19 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
 import type {
   CodexAccountRecord,
   CodexAccountSnapshot,
   CodexAuthFile,
+  CodexImportRestoreResult,
+  CodexRuntimeId,
+  CodexRuntimeSyncResult,
   CodexWorkspaceSummary,
   ManagedIdeAdapter,
   ManagedIdeAvailabilityReason,
+  ManagedIdeCodexRuntimeStatus,
   ManagedIdeCurrentStatus,
   ManagedIdeInstallationStatus,
   ManagedIdeQuotaSnapshot,
@@ -18,12 +23,18 @@ import type {
 } from './types';
 import { normalizeCodexAgentMode, normalizeCodexServiceTier } from './codexMetadata';
 import { CloudAccountRepo, isCloudStorageUnavailableError } from '../ipc/database/cloudHandler';
+import { ConfigManager } from '../ipc/config/manager';
 import {
   closeManagedIde,
   isManagedIdeProcessRunning,
   startManagedIde,
 } from '../ipc/process/handler';
-import { getManagedIdeDbPaths, getManagedIdeExecutablePath } from '../utils/paths';
+import {
+  getManagedIdeDbPaths,
+  getManagedIdeExecutablePath,
+  getManagedIdeStoragePaths,
+  isWsl,
+} from '../utils/paths';
 import { logger } from '../utils/logger';
 import { CodexAppServerClient } from './codexAppServerClient';
 import { ManagedIdeCurrentStatusSchema } from './schemas';
@@ -33,6 +44,7 @@ import {
   getCodexEmailHint,
   getCodexWorkspaceFromAuthFile,
   readCodexAuthFile,
+  removeCodexAuthFile,
   writeCodexAuthFile,
 } from './codexAuth';
 import {
@@ -44,10 +56,49 @@ import {
 import { getCodexChromeWorkspaceLabel } from './codexChromeWorkspaceHints';
 import { ensureFreshCodexLoginUrl } from './codexLoginUrl';
 import { openExternalWithPolicy } from '../utils/externalNavigation';
+import {
+  getActiveVsCodeWindowRuntimeId,
+  getActiveVsCodeWslAuthority,
+  getKnownWslAuthorities,
+  resolveWslRuntimeHome,
+  toAccessibleWslPath,
+} from '../utils/wslRuntime';
+import { getWindowsUser } from '../utils/platformPaths';
 
 const OPENAI_EXTENSION_ID = 'openai.chatgpt';
 const CACHE_KEY = 'managedIde.status.vscode-codex';
 const VSCODE_RELOAD_WINDOW_URI = 'vscode://command/workbench.action.reloadWindow';
+const WINDOWS_LOCAL_RUNTIME_LABEL = 'Windows Local';
+const WSL_REMOTE_RUNTIME_LABEL = 'WSL Remote';
+
+interface CodexGlobalStateSnapshot extends CodexGlobalStateHints {
+  rawValue: string | null;
+  updatedAt: number | null;
+}
+
+interface CodexRuntimeEnvironment {
+  id: CodexRuntimeId;
+  displayName: string;
+  installation: ManagedIdeInstallationStatus;
+  authFilePath: string | null;
+  stateDbPath: string | null;
+  storagePath: string | null;
+  authLastUpdatedAt: number | null;
+  extensionStateUpdatedAt: number | null;
+  codexCliExecutionPath: string | null;
+  wslDistroName?: string | null;
+}
+
+interface CodexResolvedRuntimeSelection {
+  runtimes: CodexRuntimeEnvironment[];
+  activeRuntimeId: CodexRuntimeId | null;
+  requiresRuntimeSelection: boolean;
+}
+
+type CodexLiveApplyResult = {
+  runtimeId: CodexRuntimeId;
+  didRestartIde: boolean;
+};
 
 interface CodexGlobalStateHints {
   codexCloudAccess: string | null;
@@ -223,16 +274,43 @@ function findExistingPath(candidates: string[]): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
-function getStableVsCodeExtensionsRoot(): string {
-  return path.join(os.homedir(), '.vscode', 'extensions');
+function getFileUpdatedAt(filePath: string | null): number | null {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
-function findOpenAiExtension(): {
+function getWindowsCodexHomePath(): string {
+  if (process.platform === 'win32') {
+    return path.join(os.homedir(), '.codex');
+  }
+
+  return path.posix.join('/mnt/c/Users', getWindowsUser(), '.codex');
+}
+
+function getWindowsCodexAuthFilePath(): string {
+  return path.join(getWindowsCodexHomePath(), 'auth.json');
+}
+
+function getWindowsVsCodeExtensionsRoot(): string {
+  if (process.platform === 'win32') {
+    return path.join(os.homedir(), '.vscode', 'extensions');
+  }
+
+  return path.posix.join('/mnt/c/Users', getWindowsUser(), '.vscode', 'extensions');
+}
+
+function findOpenAiExtension(extensionsRoot: string | null): {
   extensionPath: string | null;
   extensionVersion: string | null;
 } {
-  const extensionsRoot = getStableVsCodeExtensionsRoot();
-  if (!fs.existsSync(extensionsRoot)) {
+  if (!extensionsRoot || !fs.existsSync(extensionsRoot)) {
     return { extensionPath: null, extensionVersion: null };
   }
 
@@ -255,12 +333,18 @@ function findOpenAiExtension(): {
     : { extensionPath: null, extensionVersion: null };
 }
 
-function getCodexCliPath(extensionPath: string | null): string | null {
+function getCodexCliPath(
+  extensionPath: string | null,
+  runtimeId: CodexRuntimeId,
+): string | null {
   if (!extensionPath) {
     return null;
   }
 
-  const codexCliPath = path.join(extensionPath, 'bin', 'windows-x86_64', 'codex.exe');
+  const codexCliPath =
+    runtimeId === 'wsl-remote'
+      ? path.join(extensionPath, 'bin', 'linux-x86_64', 'codex')
+      : path.join(extensionPath, 'bin', 'windows-x86_64', 'codex.exe');
   return fs.existsSync(codexCliPath) ? codexCliPath : null;
 }
 
@@ -275,13 +359,14 @@ function readVsCodeVersion(idePath: string | null): string | null {
   return packageJson?.version ?? null;
 }
 
-function readCodexGlobalStateHints(): CodexGlobalStateHints {
-  const dbPath = findExistingPath(getManagedIdeDbPaths('vscode-codex'));
+function readCodexGlobalStateSnapshot(dbPath: string | null): CodexGlobalStateSnapshot {
   if (!dbPath) {
     return {
+      rawValue: null,
       codexCloudAccess: null,
       defaultServiceTier: null,
       agentMode: null,
+      updatedAt: null,
     };
   }
 
@@ -294,9 +379,11 @@ function readCodexGlobalStateHints(): CodexGlobalStateHints {
 
     if (!row?.value) {
       return {
+        rawValue: null,
         codexCloudAccess: null,
         defaultServiceTier: null,
         agentMode: null,
+        updatedAt: getFileUpdatedAt(dbPath),
       };
     }
 
@@ -309,6 +396,7 @@ function readCodexGlobalStateHints(): CodexGlobalStateHints {
     const rootState = parsed as Record<string, unknown>;
 
     return {
+      rawValue: row.value,
       codexCloudAccess:
         getStringCandidate(atomState, ['codexCloudAccess', 'codex-cloud-access']) ??
         getStringCandidate(rootState, ['codexCloudAccess', 'codex-cloud-access']),
@@ -318,30 +406,76 @@ function readCodexGlobalStateHints(): CodexGlobalStateHints {
       agentMode:
         getStringCandidate(atomState, ['agent-mode', 'agentMode']) ??
         getStringCandidate(rootState, ['agent-mode', 'agentMode']),
+      updatedAt: getFileUpdatedAt(dbPath),
     };
   } catch (error) {
     logger.warn('Failed to read VS Code Codex global state hints', error);
     return {
+      rawValue: null,
       codexCloudAccess: null,
       defaultServiceTier: null,
       agentMode: null,
+      updatedAt: getFileUpdatedAt(dbPath),
     };
   }
 }
 
-function getInstallationStatusFromEnvironment(): ManagedIdeInstallationStatus {
-  const idePath = getManagedIdeExecutablePath('vscode-codex') || null;
+function writeCodexGlobalStateSnapshot(dbPath: string | null, rawValue: string): boolean {
+  if (!dbPath) {
+    return false;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const database = new Database(dbPath);
+    database
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS ItemTable (
+          key TEXT PRIMARY KEY,
+          value BLOB
+        )`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO ItemTable(key, value)
+         VALUES('openai.chatgpt', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(rawValue);
+    database.close();
+    return true;
+  } catch (error) {
+    logger.warn('Failed to write VS Code Codex global state hints', error);
+    return false;
+  }
+}
+
+function getInstallationStatusFromEnvironment(input: {
+  runtimeId: CodexRuntimeId;
+  displayName: string;
+  idePath: string | null;
+  extensionPath: string | null;
+  extensionVersion: string | null;
+  codexCliPath: string | null;
+}): ManagedIdeInstallationStatus {
+  const idePath = input.idePath;
   const ideVersion = readVsCodeVersion(idePath);
-  const { extensionPath, extensionVersion } = findOpenAiExtension();
-  const codexCliPath = getCodexCliPath(extensionPath);
+  const extensionPath = input.extensionPath;
+  const extensionVersion = input.extensionVersion;
+  const codexCliPath = input.codexCliPath;
 
   let reason: ManagedIdeAvailabilityReason = 'ready';
   let available = true;
+  const ideExists = Boolean(idePath && fs.existsSync(idePath));
 
-  if (process.platform !== 'win32') {
+  if (input.runtimeId === 'windows-local' && process.platform !== 'win32' && !isWsl()) {
     reason = 'unsupported_platform';
     available = false;
-  } else if (!idePath) {
+  } else if (input.runtimeId === 'wsl-remote' && process.platform !== 'win32' && !isWsl()) {
+    reason = 'unsupported_platform';
+    available = false;
+  } else if (!ideExists) {
     reason = 'ide_not_found';
     available = false;
   } else if (!extensionPath) {
@@ -354,7 +488,7 @@ function getInstallationStatusFromEnvironment(): ManagedIdeInstallationStatus {
 
   return {
     targetId: 'vscode-codex',
-    platformSupported: process.platform === 'win32',
+    platformSupported: process.platform === 'win32' || isWsl(),
     available,
     reason,
     idePath,
@@ -363,6 +497,269 @@ function getInstallationStatusFromEnvironment(): ManagedIdeInstallationStatus {
     extensionVersion,
     codexCliPath,
     extensionId: extensionPath ? OPENAI_EXTENSION_ID : null,
+  };
+}
+
+function createRuntimeStatusSnapshot(
+  runtime: CodexRuntimeEnvironment,
+  status: Omit<ManagedIdeCodexRuntimeStatus, 'id' | 'displayName'>,
+): ManagedIdeCodexRuntimeStatus {
+  return {
+    id: runtime.id,
+    displayName: runtime.displayName,
+    ...status,
+  };
+}
+
+function createUnavailableRuntimeStatus(
+  runtime: CodexRuntimeEnvironment,
+  reason: ManagedIdeAvailabilityReason,
+): ManagedIdeCodexRuntimeStatus {
+  const lastUpdatedAt = Date.now();
+  return createRuntimeStatusSnapshot(runtime, {
+    installation: runtime.installation,
+    session: buildUnavailableSession(reason === 'not_signed_in' ? 'requires_login' : 'unavailable'),
+    quota: null,
+    quotaByLimitId: null,
+    authFilePath: runtime.authFilePath,
+    stateDbPath: runtime.stateDbPath,
+    storagePath: runtime.storagePath,
+    authLastUpdatedAt: runtime.authLastUpdatedAt,
+    extensionStateUpdatedAt: runtime.extensionStateUpdatedAt,
+    lastUpdatedAt,
+  });
+}
+
+function getPreferredTopLevelStatus(
+  runtimes: ManagedIdeCodexRuntimeStatus[],
+  activeRuntimeId: CodexRuntimeId | null,
+): ManagedIdeCodexRuntimeStatus | null {
+  const activeRuntime =
+    (activeRuntimeId
+      ? runtimes.find((runtime) => runtime.id === activeRuntimeId) ?? null
+      : null) ??
+    runtimes.find((runtime) => runtime.installation.available) ??
+    runtimes[0] ??
+    null;
+
+  return activeRuntime;
+}
+
+function getMergedInstallationStatus(
+  runtimes: ManagedIdeCodexRuntimeStatus[],
+  activeRuntimeId: CodexRuntimeId | null,
+): ManagedIdeInstallationStatus {
+  const preferredRuntime = getPreferredTopLevelStatus(runtimes, activeRuntimeId);
+  if (preferredRuntime) {
+    return preferredRuntime.installation;
+  }
+
+  return {
+    targetId: 'vscode-codex',
+    platformSupported: process.platform === 'win32' || isWsl(),
+    available: false,
+    reason: 'unsupported_platform',
+    idePath: null,
+    ideVersion: null,
+    extensionPath: null,
+    extensionVersion: null,
+    codexCliPath: null,
+    extensionId: null,
+  };
+}
+
+function createCurrentStatusFromRuntimes(input: {
+  runtimes: ManagedIdeCodexRuntimeStatus[];
+  activeRuntimeId: CodexRuntimeId | null;
+  requiresRuntimeSelection: boolean;
+  hasRuntimeMismatch: boolean;
+  isProcessRunning: boolean;
+  fromCache: boolean;
+}): ManagedIdeCurrentStatus {
+  const topLevelRuntime = getPreferredTopLevelStatus(input.runtimes, input.activeRuntimeId);
+  const lastUpdatedAt = topLevelRuntime?.lastUpdatedAt ?? Date.now();
+
+  return {
+    targetId: 'vscode-codex',
+    installation: getMergedInstallationStatus(input.runtimes, input.activeRuntimeId),
+    session: topLevelRuntime?.session ?? buildUnavailableSession('unavailable'),
+    quota: topLevelRuntime?.quota ?? null,
+    quotaByLimitId: topLevelRuntime?.quotaByLimitId ?? null,
+    isProcessRunning: input.isProcessRunning,
+    lastUpdatedAt,
+    fromCache: input.fromCache,
+    activeRuntimeId: input.activeRuntimeId,
+    requiresRuntimeSelection: input.requiresRuntimeSelection,
+    hasRuntimeMismatch: input.hasRuntimeMismatch,
+    runtimes: input.runtimes,
+  };
+}
+
+function getRuntimeMismatch(
+  runtimes: Array<{
+    runtime: CodexRuntimeEnvironment;
+    authFile: CodexAuthFile | null;
+    hints: CodexGlobalStateSnapshot;
+    status: ManagedIdeCodexRuntimeStatus;
+  }>,
+): boolean {
+  const availableRuntimes = runtimes.filter((runtime) => runtime.runtime.installation.available);
+  if (availableRuntimes.length < 2) {
+    return false;
+  }
+
+  const [left, right] = availableRuntimes;
+  return (
+    (left.authFile?.tokens?.account_id ?? null) !== (right.authFile?.tokens?.account_id ?? null) ||
+    (left.authFile?.auth_mode ?? null) !== (right.authFile?.auth_mode ?? null) ||
+    left.status.session.email !== right.status.session.email ||
+    left.status.session.state !== right.status.session.state ||
+    left.hints.codexCloudAccess !== right.hints.codexCloudAccess ||
+    left.hints.defaultServiceTier !== right.hints.defaultServiceTier ||
+    left.hints.agentMode !== right.hints.agentMode
+  );
+}
+
+function getWslRemoteAuthorityHint(): string | null {
+  return getActiveVsCodeWslAuthority() ?? getKnownWslAuthorities()[0] ?? null;
+}
+
+function createWindowsLocalRuntimeEnvironment(): CodexRuntimeEnvironment {
+  const idePath = getManagedIdeExecutablePath('vscode-codex') || null;
+  const { extensionPath, extensionVersion } = findOpenAiExtension(getWindowsVsCodeExtensionsRoot());
+  const codexCliPath = getCodexCliPath(extensionPath, 'windows-local');
+  const stateDbPath = findExistingPath(getManagedIdeDbPaths('vscode-codex'));
+  const storagePath = findExistingPath(getManagedIdeStoragePaths('vscode-codex'));
+  const authFilePath = getWindowsCodexAuthFilePath();
+
+  return {
+    id: 'windows-local',
+    displayName: WINDOWS_LOCAL_RUNTIME_LABEL,
+    installation: getInstallationStatusFromEnvironment({
+      runtimeId: 'windows-local',
+      displayName: WINDOWS_LOCAL_RUNTIME_LABEL,
+      idePath,
+      extensionPath,
+      extensionVersion,
+      codexCliPath,
+    }),
+    authFilePath,
+    stateDbPath,
+    storagePath,
+    authLastUpdatedAt: getFileUpdatedAt(authFilePath),
+    extensionStateUpdatedAt: getFileUpdatedAt(stateDbPath),
+    codexCliExecutionPath: codexCliPath,
+    wslDistroName: null,
+  };
+}
+
+function createWslRemoteRuntimeEnvironment(): CodexRuntimeEnvironment | null {
+  const authorityHint = getWslRemoteAuthorityHint();
+  const wslHome = resolveWslRuntimeHome(authorityHint);
+  if (!wslHome) {
+    return null;
+  }
+
+  const idePath = getManagedIdeExecutablePath('vscode-codex') || null;
+  const extensionsRoot = path.join(wslHome.accessibleHomePath, '.vscode-server', 'extensions');
+  const { extensionPath, extensionVersion } = findOpenAiExtension(extensionsRoot);
+  const codexCliPath = getCodexCliPath(extensionPath, 'wsl-remote');
+  const stateDbPath = path.join(
+    wslHome.accessibleHomePath,
+    '.vscode-server',
+    'data',
+    'User',
+    'globalStorage',
+    'state.vscdb',
+  );
+  const storagePath = path.join(
+    wslHome.accessibleHomePath,
+    '.vscode-server',
+    'data',
+    'User',
+    'globalStorage',
+    'storage.json',
+  );
+  const authFilePath = path.join(wslHome.accessibleHomePath, '.codex', 'auth.json');
+  const codexCliExecutionPath =
+    process.platform === 'win32' && extensionPath
+      ? path.posix.join(
+          wslHome.linuxHomePath,
+          '.vscode-server',
+          'extensions',
+          path.basename(extensionPath ?? ''),
+          'bin',
+          'linux-x86_64',
+          'codex',
+        )
+      : codexCliPath;
+
+  return {
+    id: 'wsl-remote',
+    displayName: WSL_REMOTE_RUNTIME_LABEL,
+    installation: getInstallationStatusFromEnvironment({
+      runtimeId: 'wsl-remote',
+      displayName: WSL_REMOTE_RUNTIME_LABEL,
+      idePath,
+      extensionPath,
+      extensionVersion,
+      codexCliPath,
+    }),
+    authFilePath,
+    stateDbPath,
+    storagePath,
+    authLastUpdatedAt: getFileUpdatedAt(authFilePath),
+    extensionStateUpdatedAt: getFileUpdatedAt(stateDbPath),
+    codexCliExecutionPath,
+    wslDistroName: wslHome.distroName,
+  };
+}
+
+function resolveCodexRuntimeSelection(
+  runtimes: CodexRuntimeEnvironment[],
+): CodexResolvedRuntimeSelection {
+  const availableRuntimeIds = runtimes
+    .filter((runtime) => runtime.installation.available)
+    .map((runtime) => runtime.id);
+  const detectedRuntimeId = getActiveVsCodeWindowRuntimeId();
+
+  if (availableRuntimeIds.length === 0) {
+    return {
+      runtimes,
+      activeRuntimeId: null,
+      requiresRuntimeSelection: false,
+    };
+  }
+
+  if (detectedRuntimeId && availableRuntimeIds.includes(detectedRuntimeId)) {
+    return {
+      runtimes,
+      activeRuntimeId: detectedRuntimeId,
+      requiresRuntimeSelection: false,
+    };
+  }
+
+  if (availableRuntimeIds.length === 1) {
+    return {
+      runtimes,
+      activeRuntimeId: availableRuntimeIds[0] ?? null,
+      requiresRuntimeSelection: false,
+    };
+  }
+
+  const override = ConfigManager.loadConfig().codex_runtime_override;
+  if (override && availableRuntimeIds.includes(override)) {
+    return {
+      runtimes,
+      activeRuntimeId: override,
+      requiresRuntimeSelection: false,
+    };
+  }
+
+  return {
+    runtimes,
+    activeRuntimeId: null,
+    requiresRuntimeSelection: true,
   };
 }
 
@@ -450,23 +847,6 @@ function writeCachedStatus(status: ManagedIdeCurrentStatus): void {
   } catch (error) {
     logger.warn('Failed to cache VS Code Codex status snapshot', error);
   }
-}
-
-function createUnavailableStatus(
-  installation: ManagedIdeInstallationStatus,
-  reason: ManagedIdeAvailabilityReason,
-): ManagedIdeCurrentStatus {
-  const lastUpdatedAt = Date.now();
-  return {
-    targetId: 'vscode-codex',
-    installation,
-    session: buildUnavailableSession(reason === 'not_signed_in' ? 'requires_login' : 'unavailable'),
-    quota: null,
-    quotaByLimitId: null,
-    isProcessRunning: false,
-    lastUpdatedAt,
-    fromCache: false,
-  };
 }
 
 function getPreferredCodexEmail(
@@ -632,20 +1012,53 @@ function createStoredSnapshotFromAuthFile(
   };
 }
 
+function normalizeExecOutput(output: Buffer | string): string {
+  const text = Buffer.isBuffer(output) ? output.toString('utf8') : output;
+  return text.split('\0').join('').trim();
+}
+
+function runWslShellCommand(distroName: string, command: string): string {
+  const output = execSync(`wsl.exe -d ${JSON.stringify(distroName)} sh -lc ${JSON.stringify(command)}`, {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return normalizeExecOutput(output);
+}
+
 async function withTemporaryCodexHome<T>(
+  runtime: CodexRuntimeEnvironment,
   prefix: string,
-  action: (codexHome: string) => Promise<T>,
+  action: (codexHomePaths: { hostPath: string; runtimePath: string }) => Promise<T>,
 ): Promise<T> {
+  if (runtime.id === 'wsl-remote' && process.platform === 'win32' && runtime.wslDistroName) {
+    const runtimePath = runWslShellCommand(
+      runtime.wslDistroName,
+      `mktemp -d -p /tmp ${prefix}XXXXXX`,
+    );
+    const hostPath = toAccessibleWslPath(runtime.wslDistroName, runtimePath);
+    try {
+      return await action({ hostPath, runtimePath });
+    } finally {
+      try {
+        runWslShellCommand(runtime.wslDistroName, `rm -rf ${JSON.stringify(runtimePath)}`);
+      } catch {
+        // Ignore cleanup failures.
+      }
+    }
+  }
+
   const codexHome = await fsp.mkdtemp(path.join(os.tmpdir(), prefix));
   try {
-    return await action(codexHome);
+    return await action({ hostPath: codexHome, runtimePath: codexHome });
   } finally {
     await fsp.rm(codexHome, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-async function waitForAuthFile(codexHome: string, timeoutMs = 5000): Promise<CodexAuthFile | null> {
-  const authPath = getCodexAuthFilePath(codexHome);
+async function waitForAuthFile(
+  codexHomePath: string,
+  timeoutMs = 5000,
+): Promise<CodexAuthFile | null> {
+  const authPath = getCodexAuthFilePath(codexHomePath);
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -672,6 +1085,27 @@ async function reloadRunningVsCodeWindow(): Promise<boolean> {
 export class VscodeCodexAdapter implements ManagedIdeAdapter {
   readonly targetId = 'vscode-codex' as const;
 
+  private resolveRuntimeSelection(): CodexResolvedRuntimeSelection {
+    const runtimes = [createWindowsLocalRuntimeEnvironment()];
+    const wslRuntime = createWslRemoteRuntimeEnvironment();
+    if (wslRuntime) {
+      runtimes.push(wslRuntime);
+    }
+
+    return resolveCodexRuntimeSelection(runtimes);
+  }
+
+  private getRuntimeById(
+    selection: CodexResolvedRuntimeSelection,
+    runtimeId: CodexRuntimeId | null,
+  ): CodexRuntimeEnvironment | null {
+    if (!runtimeId) {
+      return null;
+    }
+
+    return selection.runtimes.find((runtime) => runtime.id === runtimeId) ?? null;
+  }
+
   private async resolveProcessRunningState(
     options?: { refresh?: boolean },
     cachedProcessState?: boolean,
@@ -684,7 +1118,37 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   }
 
   async getInstallationStatus(): Promise<ManagedIdeInstallationStatus> {
-    return getInstallationStatusFromEnvironment();
+    const selection = this.resolveRuntimeSelection();
+    return getMergedInstallationStatus(
+      selection.runtimes.map((runtime) => createUnavailableRuntimeStatus(runtime, runtime.installation.reason)),
+      selection.activeRuntimeId,
+    );
+  }
+
+  private createCodexClient(
+    runtime: CodexRuntimeEnvironment,
+    runtimeCodexHomePath: string,
+  ): CodexAppServerClient {
+    if (runtime.id === 'wsl-remote' && process.platform === 'win32' && runtime.wslDistroName) {
+      return new CodexAppServerClient(runtime.codexCliExecutionPath as string, {
+        spawnCommand: 'wsl.exe',
+        spawnArgs: [
+          '-d',
+          runtime.wslDistroName,
+          '--exec',
+          'env',
+          `CODEX_HOME=${runtimeCodexHomePath}`,
+          runtime.codexCliExecutionPath as string,
+          'app-server',
+        ],
+      });
+    }
+
+    return new CodexAppServerClient(runtime.codexCliExecutionPath as string, {
+      env: {
+        CODEX_HOME: runtimeCodexHomePath,
+      },
+    });
   }
 
   private async syncCurrentSessionIntoPool(
@@ -700,6 +1164,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, status.session.email),
         accountId: authFile.tokens.account_id,
         authMode: status.session.authMode ?? authFile.auth_mode,
+        hydrationState: 'live',
         workspace: getPreferredPersistedWorkspace({
           derivedWorkspace: getResolvedCodexWorkspace(
             authFile,
@@ -724,6 +1189,125 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
+  private getActiveRuntimeOrThrow(
+    selection = this.resolveRuntimeSelection(),
+  ): CodexRuntimeEnvironment {
+    if (selection.requiresRuntimeSelection || !selection.activeRuntimeId) {
+      throw new Error('CODEX_RUNTIME_SELECTION_REQUIRED');
+    }
+
+    const runtime = this.getRuntimeById(selection, selection.activeRuntimeId);
+    if (
+      !runtime ||
+      !runtime.installation.available ||
+      !runtime.codexCliExecutionPath ||
+      !runtime.authFilePath
+    ) {
+      throw new Error('CODEX_IDE_UNAVAILABLE');
+    }
+
+    return runtime;
+  }
+
+  private getImportRestoreTarget(selection = this.resolveRuntimeSelection()): {
+    runtime: CodexRuntimeEnvironment | null;
+    status: CodexImportRestoreResult['status'] | null;
+  } {
+    if (selection.requiresRuntimeSelection || !selection.activeRuntimeId) {
+      return {
+        runtime: null,
+        status: 'stored_only_runtime_selection_required',
+      };
+    }
+
+    const runtime = this.getRuntimeById(selection, selection.activeRuntimeId);
+    if (!runtime || !runtime.installation.available || !runtime.authFilePath) {
+      return {
+        runtime: null,
+        status: 'stored_only_runtime_unavailable',
+      };
+    }
+
+    return {
+      runtime,
+      status: null,
+    };
+  }
+
+  private restoreRuntimeAuthFile(
+    runtime: CodexRuntimeEnvironment,
+    previousAuthFile: CodexAuthFile | null,
+  ): void {
+    if (!runtime.authFilePath) {
+      return;
+    }
+
+    if (previousAuthFile) {
+      writeCodexAuthFile(previousAuthFile, runtime.authFilePath);
+      return;
+    }
+
+    removeCodexAuthFile(runtime.authFilePath);
+  }
+
+  private async applyAccountToRuntime(input: {
+    id: string;
+    authFile: CodexAuthFile;
+    runtime: CodexRuntimeEnvironment;
+    forceFullRestart: boolean;
+  }): Promise<CodexLiveApplyResult> {
+    const previousAuthFile = input.runtime.authFilePath
+      ? readCodexAuthFile(input.runtime.authFilePath)
+      : null;
+
+    writeCodexAuthFile(input.authFile, input.runtime.authFilePath as string);
+
+    try {
+      const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
+      let didRestartIde = false;
+
+      if (wasRunning) {
+        if (input.forceFullRestart) {
+          await closeManagedIde('vscode-codex', { includeProcessTree: false });
+          await startManagedIde('vscode-codex', false);
+          didRestartIde = true;
+        } else {
+          const didReloadWindow = await reloadRunningVsCodeWindow();
+          if (!didReloadWindow) {
+            await closeManagedIde('vscode-codex', { includeProcessTree: false });
+            await startManagedIde('vscode-codex', false);
+            didRestartIde = true;
+          }
+        }
+      }
+
+      await CodexAccountStore.setActive(input.id);
+
+      return {
+        runtimeId: input.runtime.id,
+        didRestartIde,
+      };
+    } catch (error) {
+      try {
+        this.restoreRuntimeAuthFile(input.runtime, previousAuthFile);
+      } catch (restoreError) {
+        logger.warn(
+          'Failed to restore the previous Codex auth file after activation failure',
+          restoreError,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async markAccountHydrationLive(id: string): Promise<void> {
+    try {
+      await CodexAccountStore.setHydrationState(id, 'live');
+    } catch (error) {
+      logger.warn(`Failed to mark Codex account ${id} as live after runtime apply`, error);
+    }
+  }
+
   private async ensureCurrentDefaultSessionStored(
     authFile: CodexAuthFile | null,
     options?: {
@@ -743,6 +1327,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, preferredStatus?.session.email),
         accountId: authFile.tokens.account_id,
         authMode: preferredStatus?.session.authMode ?? authFile.auth_mode,
+        hydrationState: 'live',
         workspace: getPreferredPersistedWorkspace({
           derivedWorkspace: getResolvedCodexWorkspace(
             authFile,
@@ -767,42 +1352,39 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
-  private async buildStatusFromAuthFile(
-    installation: ManagedIdeInstallationStatus,
+  private async buildRuntimeStatusFromAuthFile(
+    runtime: CodexRuntimeEnvironment,
     authFile: CodexAuthFile | null,
-    options?: { fromDefaultHome?: boolean },
-  ): Promise<ManagedIdeCurrentStatus> {
-    if (!installation.available || !installation.codexCliPath) {
-      return createUnavailableStatus(installation, installation.reason);
+  ): Promise<ManagedIdeCodexRuntimeStatus> {
+    if (!runtime.installation.available || !runtime.codexCliExecutionPath) {
+      return createUnavailableRuntimeStatus(runtime, runtime.installation.reason);
     }
 
-    const hints = readCodexGlobalStateHints();
+    const hints = readCodexGlobalStateSnapshot(
+      runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null,
+    );
     const lastUpdatedAt = Date.now();
 
     if (!authFile?.tokens?.account_id) {
-      return {
-        targetId: 'vscode-codex',
-        installation,
+      return createRuntimeStatusSnapshot(runtime, {
+        installation: runtime.installation,
         session: buildUnavailableSession('requires_login'),
         quota: null,
         quotaByLimitId: null,
-        isProcessRunning: options?.fromDefaultHome
-          ? await isManagedIdeProcessRunning('vscode-codex')
-          : false,
+        authFilePath: runtime.authFilePath,
+        stateDbPath: runtime.stateDbPath,
+        storagePath: runtime.storagePath,
+        authLastUpdatedAt: runtime.authLastUpdatedAt,
+        extensionStateUpdatedAt: runtime.extensionStateUpdatedAt,
         lastUpdatedAt,
-        fromCache: false,
-      };
+      });
     }
 
     try {
-      const status = await withTemporaryCodexHome('applyron-codex-probe-', async (codexHome) => {
-        writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome));
+      const status = await withTemporaryCodexHome(runtime, 'applyron-codex-probe-', async (codexHome) => {
+        writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome.hostPath));
 
-        const client = new CodexAppServerClient(installation.codexCliPath as string, {
-          env: {
-            CODEX_HOME: codexHome,
-          },
-        });
+        const client = this.createCodexClient(runtime, codexHome.runtimePath);
         const snapshot = await client.collectSnapshot();
         const rateLimits =
           normalizeQuotaSnapshot(snapshot.rateLimits?.rateLimits) ||
@@ -826,9 +1408,8 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
           snapshot.planTypeHint ??
           (hints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
 
-        return {
-          targetId: 'vscode-codex',
-          installation,
+        return createRuntimeStatusSnapshot(runtime, {
+          installation: runtime.installation,
           session: {
             state: sessionState,
             accountType: account?.type ?? null,
@@ -857,67 +1438,80 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
             rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
               ? rateLimitsByLimitId
               : null,
-          isProcessRunning: options?.fromDefaultHome
-            ? await isManagedIdeProcessRunning('vscode-codex')
-            : false,
+          authFilePath: runtime.authFilePath,
+          stateDbPath: runtime.stateDbPath,
+          storagePath: runtime.storagePath,
+          authLastUpdatedAt: runtime.authLastUpdatedAt,
+          extensionStateUpdatedAt: hints.updatedAt ?? runtime.extensionStateUpdatedAt,
           lastUpdatedAt,
-          fromCache: false,
-        } satisfies ManagedIdeCurrentStatus;
+        });
       });
 
       return status;
     } catch (error) {
-      logger.error('Failed to collect VS Code Codex status from app-server', error);
-      return createUnavailableStatus(installation, 'app_server_unavailable');
+      logger.error(`Failed to collect ${runtime.displayName} Codex status from app-server`, error);
+      return createUnavailableRuntimeStatus(runtime, 'app_server_unavailable');
     }
   }
 
   async getCurrentStatus(options?: { refresh?: boolean }): Promise<ManagedIdeCurrentStatus> {
-    const installation = await this.getInstallationStatus();
+    const selection = this.resolveRuntimeSelection();
     const cached = readCachedStatus();
-
-    if (!installation.available) {
-      return cached
-        ? {
-            ...cached,
-            installation,
-            isProcessRunning: await this.resolveProcessRunningState(
-              options,
-              cached.isProcessRunning,
-            ),
-            fromCache: true,
-          }
-        : createUnavailableStatus(installation, installation.reason);
-    }
+    const isProcessRunning = await this.resolveProcessRunningState(options, cached?.isProcessRunning);
 
     const shouldProbeLive =
-      options?.refresh === true || !cached || cached.session.state !== 'ready';
+      options?.refresh === true ||
+      !cached ||
+      cached.session.state !== 'ready' ||
+      cached.activeRuntimeId !== selection.activeRuntimeId ||
+      cached.requiresRuntimeSelection !== selection.requiresRuntimeSelection ||
+      cached.runtimes.length !== selection.runtimes.length;
 
     if (!shouldProbeLive && cached) {
       return {
         ...cached,
-        installation,
-        isProcessRunning: await this.resolveProcessRunningState(options, cached.isProcessRunning),
+        isProcessRunning,
         fromCache: true,
       };
     }
 
-    const authFile = readCodexAuthFile();
-    const status = await this.buildStatusFromAuthFile(installation, authFile, {
-      fromDefaultHome: true,
+    const runtimeResults = await Promise.all(
+      selection.runtimes.map(async (runtime) => {
+        const authFile = runtime.authFilePath ? readCodexAuthFile(runtime.authFilePath) : null;
+        const hints = readCodexGlobalStateSnapshot(
+          runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null,
+        );
+        const status = await this.buildRuntimeStatusFromAuthFile(runtime, authFile);
+        return { runtime, authFile, hints, status };
+      }),
+    );
+
+    const status = createCurrentStatusFromRuntimes({
+      runtimes: runtimeResults.map((result) => result.status),
+      activeRuntimeId: selection.activeRuntimeId,
+      requiresRuntimeSelection: selection.requiresRuntimeSelection,
+      hasRuntimeMismatch: getRuntimeMismatch(runtimeResults),
+      isProcessRunning,
+      fromCache: false,
     });
 
     if (status.session.state === 'ready') {
       writeCachedStatus(status);
-      if (authFile?.tokens?.account_id) {
-        await this.syncCurrentSessionIntoPool(status, authFile);
+      const activeRuntimeResult = runtimeResults.find(
+        (result) => result.runtime.id === status.activeRuntimeId,
+      );
+      if (activeRuntimeResult?.authFile?.tokens?.account_id) {
+        await this.syncCurrentSessionIntoPool(status, activeRuntimeResult.authFile);
       }
       return status;
     }
 
     if (cached) {
-      if (cached.session.state === 'ready' && authFile?.tokens?.account_id) {
-        await this.ensureCurrentDefaultSessionStored(authFile, {
+      const activeRuntimeResult = runtimeResults.find(
+        (result) => result.runtime.id === cached.activeRuntimeId,
+      );
+      if (cached.session.state === 'ready' && activeRuntimeResult?.authFile?.tokens?.account_id) {
+        await this.ensureCurrentDefaultSessionStored(activeRuntimeResult.authFile, {
           preferredStatus: cached,
           makeActive: true,
         });
@@ -925,8 +1519,12 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
 
       return {
         ...cached,
-        installation,
-        isProcessRunning: await this.resolveProcessRunningState(options, cached.isProcessRunning),
+        installation: status.installation,
+        isProcessRunning,
+        activeRuntimeId: status.activeRuntimeId,
+        requiresRuntimeSelection: status.requiresRuntimeSelection,
+        hasRuntimeMismatch: status.hasRuntimeMismatch,
+        runtimes: status.runtimes,
         fromCache: true,
       };
     }
@@ -1005,12 +1603,9 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   }
 
   async importCurrentSession(): Promise<CodexAccountRecord> {
-    const installation = await this.getInstallationStatus();
-    if (!installation.available) {
-      throw new Error('CODEX_IDE_UNAVAILABLE');
-    }
+    const runtime = this.getActiveRuntimeOrThrow();
 
-    const authFile = readCodexAuthFile();
+    const authFile = runtime.authFilePath ? readCodexAuthFile(runtime.authFilePath) : null;
     if (!authFile?.tokens?.account_id) {
       throw new Error('CODEX_CURRENT_SESSION_NOT_AVAILABLE');
     }
@@ -1021,6 +1616,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         email: getPreferredCodexEmail(authFile, status.session.email),
         accountId: authFile.tokens.account_id,
         authMode: status.session.authMode ?? authFile.auth_mode,
+        hydrationState: 'live',
         workspace: getPreferredPersistedWorkspace({
           derivedWorkspace: getResolvedCodexWorkspace(
             authFile,
@@ -1042,12 +1638,9 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   }
 
   async addAccount(): Promise<CodexAccountRecord[]> {
-    const installation = await this.getInstallationStatus();
-    if (!installation.available || !installation.codexCliPath) {
-      throw new Error('CODEX_IDE_UNAVAILABLE');
-    }
+    const runtime = this.getActiveRuntimeOrThrow();
 
-    const currentAuthFile = readCodexAuthFile();
+    const currentAuthFile = runtime.authFilePath ? readCodexAuthFile(runtime.authFilePath) : null;
     try {
       const currentStatus = await this.getCurrentStatus({ refresh: true });
       if (currentStatus.session.state !== 'ready') {
@@ -1072,12 +1665,8 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
       });
     }
 
-    return withTemporaryCodexHome('applyron-codex-login-', async (codexHome) => {
-      const client = new CodexAppServerClient(installation.codexCliPath as string, {
-        env: {
-          CODEX_HOME: codexHome,
-        },
-      });
+    return withTemporaryCodexHome(runtime, 'applyron-codex-login-', async (codexHome) => {
+      const client = this.createCodexClient(runtime, codexHome.runtimePath);
 
       try {
         await client.loginWithChatGpt({
@@ -1095,12 +1684,19 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         await client.dispose();
       }
 
-      const authFile = await waitForAuthFile(codexHome);
+      const authFile = await waitForAuthFile(codexHome.hostPath);
       if (!authFile?.tokens?.account_id) {
         throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
       }
 
-      const status = await this.buildStatusFromAuthFile(installation, authFile);
+      const status = createCurrentStatusFromRuntimes({
+        runtimes: [await this.buildRuntimeStatusFromAuthFile(runtime, authFile)],
+        activeRuntimeId: runtime.id,
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        isProcessRunning: false,
+        fromCache: false,
+      });
       const workspace = getPreferredPersistedWorkspace({
         derivedWorkspace: getResolvedCodexWorkspace(
           authFile,
@@ -1150,10 +1746,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     id: string,
     options?: { suppressExpectedSecurityLogs?: boolean },
   ): Promise<CodexAccountRecord> {
-    const installation = await this.getInstallationStatus();
-    if (!installation.available) {
-      throw new Error('CODEX_IDE_UNAVAILABLE');
-    }
+    const runtime = this.getActiveRuntimeOrThrow();
 
     try {
       const account = await CodexAccountStore.getAccount(id);
@@ -1168,7 +1761,14 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
       }
 
-      const status = await this.buildStatusFromAuthFile(installation, authFile);
+      const status = createCurrentStatusFromRuntimes({
+        runtimes: [await this.buildRuntimeStatusFromAuthFile(runtime, authFile)],
+        activeRuntimeId: runtime.id,
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        isProcessRunning: false,
+        fromCache: false,
+      });
       await CodexAccountStore.upsertAccount({
         existingId: account.id,
         email: getPreferredCodexEmail(authFile, status.session.email),
@@ -1261,17 +1861,17 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
         throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
       }
 
-      const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
-      writeCodexAuthFile(authFile);
-      await CodexAccountStore.setActive(id);
+      const runtime = this.getActiveRuntimeOrThrow();
+      const hydrationState = await CodexAccountStore.getHydrationState(id);
+      const requiresImportRestore = hydrationState === 'needs_import_restore';
 
-      if (wasRunning) {
-        const didReloadWindow = await reloadRunningVsCodeWindow();
-        if (!didReloadWindow) {
-          await closeManagedIde('vscode-codex', { includeProcessTree: false });
-          await startManagedIde('vscode-codex', false);
-        }
-      }
+      await this.applyAccountToRuntime({
+        id,
+        authFile,
+        runtime,
+        forceFullRestart: requiresImportRestore,
+      });
+      await this.markAccountHydrationLive(id);
 
       try {
         const refreshedStatus = await this.getCurrentStatus({ refresh: true });
@@ -1281,6 +1881,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
           label: account.label,
           accountId: authFile.tokens.account_id,
           authMode: refreshedStatus.session.authMode ?? authFile.auth_mode,
+          hydrationState: 'live',
           workspace: getPreferredPersistedWorkspace({
             derivedWorkspace: getResolvedCodexWorkspace(
               authFile,
@@ -1307,12 +1908,160 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
   }
 
+  async restoreImportedAccount(id: string | null): Promise<CodexImportRestoreResult> {
+    if (!id) {
+      return {
+        restoredAccountId: null,
+        appliedRuntimeId: null,
+        didRestartIde: false,
+        status: 'skipped_no_active_codex',
+        warnings: [],
+      };
+    }
+
+    try {
+      if (!(await CodexAccountStore.getAccount(id))) {
+        throw new Error('CODEX_ACCOUNT_NOT_FOUND');
+      }
+
+      const authFile = await CodexAccountStore.readAuthFile(id);
+      if (!authFile?.tokens?.account_id) {
+        throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
+      }
+
+      const target = this.getImportRestoreTarget();
+      if (!target.runtime || target.status) {
+        await CodexAccountStore.setActive(id);
+        return {
+          restoredAccountId: id,
+          appliedRuntimeId: null,
+          didRestartIde: false,
+          status: target.status ?? 'stored_only_runtime_unavailable',
+          warnings: [],
+        };
+      }
+
+      const applyResult = await this.applyAccountToRuntime({
+        id,
+        authFile,
+        runtime: target.runtime,
+        forceFullRestart: true,
+      });
+      await this.markAccountHydrationLive(id);
+
+      return {
+        restoredAccountId: id,
+        appliedRuntimeId: applyResult.runtimeId,
+        didRestartIde: applyResult.didRestartIde,
+        status: 'applied',
+        warnings: [],
+      };
+    } catch (error) {
+      throw toCodexAccountStoreError(error, 'CODEX_ACCOUNT_POOL_UNAVAILABLE');
+    }
+  }
+
   async deleteAccount(id: string): Promise<void> {
     try {
       await CodexAccountStore.removeAccount(id);
     } catch (error) {
       throw toCodexAccountStoreError(error, 'CODEX_ACCOUNT_POOL_UNAVAILABLE');
     }
+  }
+
+  async syncRuntimeState(): Promise<CodexRuntimeSyncResult> {
+    const selection = this.resolveRuntimeSelection();
+    if (selection.requiresRuntimeSelection || selection.runtimes.length < 2) {
+      throw new Error('CODEX_RUNTIME_SELECTION_REQUIRED');
+    }
+
+    const runtimePairs = selection.runtimes
+      .filter((runtime) => runtime.installation.available)
+      .map((runtime) => ({
+        runtime,
+        authFile: runtime.authFilePath ? readCodexAuthFile(runtime.authFilePath) : null,
+        hints: readCodexGlobalStateSnapshot(
+          runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null,
+        ),
+      }));
+
+    if (runtimePairs.length < 2) {
+      throw new Error('CODEX_RUNTIME_SYNC_UNAVAILABLE');
+    }
+
+    const getRefreshTimestamp = (authFile: CodexAuthFile | null): number | null => {
+      const value = authFile?.last_refresh ? Date.parse(authFile.last_refresh) : Number.NaN;
+      return Number.isFinite(value) ? value : null;
+    };
+
+    const [firstRuntime, secondRuntime] = runtimePairs;
+    const firstAuthRefresh = getRefreshTimestamp(firstRuntime.authFile);
+    const secondAuthRefresh = getRefreshTimestamp(secondRuntime.authFile);
+
+    let source = firstRuntime;
+    let target = secondRuntime;
+
+    if (
+      typeof firstAuthRefresh === 'number' &&
+      typeof secondAuthRefresh === 'number' &&
+      secondAuthRefresh > firstAuthRefresh
+    ) {
+      source = secondRuntime;
+      target = firstRuntime;
+    } else if (
+      firstAuthRefresh === secondAuthRefresh ||
+      firstAuthRefresh === null ||
+      secondAuthRefresh === null
+    ) {
+      const firstStateUpdatedAt = firstRuntime.hints.updatedAt ?? 0;
+      const secondStateUpdatedAt = secondRuntime.hints.updatedAt ?? 0;
+      if (secondStateUpdatedAt > firstStateUpdatedAt) {
+        source = secondRuntime;
+        target = firstRuntime;
+      } else if (
+        secondStateUpdatedAt === firstStateUpdatedAt &&
+        selection.activeRuntimeId === secondRuntime.runtime.id
+      ) {
+        source = secondRuntime;
+        target = firstRuntime;
+      }
+    }
+
+    const warnings: string[] = [];
+    let syncedAuthFile = false;
+    let syncedExtensionState = false;
+
+    if (source.authFile && target.runtime.authFilePath) {
+      try {
+        writeCodexAuthFile(source.authFile, target.runtime.authFilePath);
+        syncedAuthFile = true;
+      } catch (error) {
+        logger.warn('Failed to sync Codex auth file across runtimes', error);
+        warnings.push('CODEX_RUNTIME_SYNC_AUTH_FAILED');
+      }
+    } else {
+      warnings.push('CODEX_RUNTIME_SYNC_AUTH_SKIPPED');
+    }
+
+    if (source.hints.rawValue && target.runtime.stateDbPath) {
+      syncedExtensionState = writeCodexGlobalStateSnapshot(
+        target.runtime.stateDbPath,
+        source.hints.rawValue,
+      );
+      if (!syncedExtensionState) {
+        warnings.push('CODEX_RUNTIME_SYNC_STATE_FAILED');
+      }
+    } else {
+      warnings.push('CODEX_RUNTIME_SYNC_STATE_SKIPPED');
+    }
+
+    return {
+      sourceRuntimeId: source.runtime.id,
+      targetRuntimeId: target.runtime.id,
+      syncedAuthFile,
+      syncedExtensionState,
+      warnings,
+    };
   }
 
   async openIde(): Promise<void> {

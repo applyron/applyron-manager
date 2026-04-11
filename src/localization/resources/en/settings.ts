@@ -39,7 +39,7 @@ export const enSettings = {
       import: {
         title: 'Import Portable Bundle',
         description:
-          'Preview the bundle first, then apply a merge import without changing the active runtime selection.',
+          'Preview the bundle first, then apply a merge import. If the bundle includes an active Codex account, Applyron restores it to the selected runtime when possible.',
         sourceFile: 'Source file',
         password: 'Import password',
         passwordPlaceholder: 'Enter the bundle password',
@@ -58,6 +58,14 @@ export const enSettings = {
         invalidFileOrPassword:
           'The selected file could not be decrypted. Verify the password and the export file.',
         previewExpired: 'The import preview expired. Re-open the file and preview it again.',
+        restoreApplied: 'The active Codex account was restored to {{runtime}}.',
+        restoreStoredOnlyRuntimeSelectionRequired:
+          'The active Codex account was imported into the pool, but live restore is waiting for you to choose a Codex runtime.',
+        restoreStoredOnlyRuntimeUnavailable:
+          'The active Codex account was imported into the pool, but live restore could not run because the Codex runtime is unavailable on this device.',
+        restoreSkippedNoActiveCodex: 'The bundle did not mark an active Codex account to restore.',
+        restoreWarningMultipleActive:
+          'Multiple active Codex records were found in the bundle, so the freshest one was selected.',
       },
       activity: {
         title: 'Activity Log',

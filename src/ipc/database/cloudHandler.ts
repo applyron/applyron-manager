@@ -408,6 +408,17 @@ const CLOUD_SCHEMA_MIGRATIONS: CloudSchemaMigration[] = [
     name: 'codex_workspace_identity',
     apply: (db) => migrateCodexWorkspaceIdentities(db),
   },
+  {
+    version: 6,
+    name: 'codex_hydration_state',
+    apply: (db) => {
+      ensureCodexAccountsColumn(
+        db,
+        'hydration_state',
+        "ALTER TABLE codex_accounts ADD COLUMN hydration_state TEXT NOT NULL DEFAULT 'live'",
+      );
+    },
+  },
 ];
 
 function getAppliedCloudMigrationVersions(db: Database.Database): Set<number> {
@@ -600,6 +611,7 @@ export function ensureCloudDatabaseInitialized(dbPath: string = getCloudAccounts
         label TEXT,
         account_id TEXT NOT NULL,
         auth_mode TEXT,
+        hydration_state TEXT NOT NULL DEFAULT 'live',
         workspace_id TEXT,
         workspace_title TEXT,
         workspace_role TEXT,

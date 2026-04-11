@@ -11,6 +11,7 @@ import { CodexAccountStore } from '../../managedIde/codexAccountStore';
 import { getCodexRecordIdentityKey } from '../../managedIde/codexIdentity';
 import { CloudAccountRepo } from '../database/cloudHandler';
 import { ActivityLogService } from '../../services/ActivityLogService';
+import { ManagedIdeService } from '../../managedIde/service';
 import {
   ActivityEventCategory,
   ApplyronPortableExportPayload,
@@ -37,8 +38,11 @@ type CodexIdentityComparable = {
   workspace?: { id: string } | null;
 };
 
+type PortableCodexRecord = ApplyronPortableExportPayload['codex'][number];
+
 const importPreviewCache = new Map<string, ImportPreviewCacheEntry>();
 const PORTABLE_EXPORT_EXTENSION = 'applyron-export';
+const CODEX_IMPORT_MULTIPLE_ACTIVE_WARNING = 'CODEX_IMPORT_MULTIPLE_ACTIVE_IMPORTED_ACCOUNTS';
 
 function getWorkspaceAgnosticCodexEmailKey(account: {
   email: string | null;
@@ -63,6 +67,38 @@ function findMatchingCodexAccount<T extends CodexIdentityComparable>(
       ? existingWorkspacelessByEmail.get(getWorkspaceAgnosticCodexEmailKey(record) as string)
       : undefined)
   );
+}
+
+function getPortableCodexRecordFreshness(record: PortableCodexRecord): number {
+  return (
+    record.snapshot?.lastUpdatedAt ??
+    record.record.snapshot?.lastUpdatedAt ??
+    record.record.lastRefreshedAt ??
+    record.record.updatedAt ??
+    record.record.createdAt ??
+    0
+  );
+}
+
+function selectPortableImportActiveCodexRecord(payload: ApplyronPortableExportPayload): {
+  selected: PortableCodexRecord | null;
+  warnings: string[];
+} {
+  const activeRecords = payload.codex
+    .filter((record) => record.record.isActive)
+    .sort((left, right) => getPortableCodexRecordFreshness(right) - getPortableCodexRecordFreshness(left));
+
+  if (activeRecords.length === 0) {
+    return {
+      selected: null,
+      warnings: [],
+    };
+  }
+
+  return {
+    selected: activeRecords[0] ?? null,
+    warnings: activeRecords.length > 1 ? [CODEX_IMPORT_MULTIPLE_ACTIVE_WARNING] : [],
+  };
 }
 
 function getDialogParentWindow() {
@@ -295,6 +331,7 @@ async function applyPortableImportPayload(
       .map((account) => [getWorkspaceAgnosticCodexEmailKey(account), account] as const)
       .filter((entry): entry is [string, (typeof existingCodex)[number]] => entry[0] !== null),
   );
+  const codexRestoreSelection = selectPortableImportActiveCodexRecord(payload);
 
   const result: ImportApplyResult = {
     imported: {
@@ -304,6 +341,13 @@ async function applyPortableImportPayload(
       cloudUpdated: 0,
       codexCreated: 0,
       codexUpdated: 0,
+    },
+    codexRestore: {
+      restoredAccountId: null,
+      appliedRuntimeId: null,
+      didRestartIde: false,
+      status: 'skipped_no_active_codex',
+      warnings: [],
     },
   };
 
@@ -346,6 +390,7 @@ async function applyPortableImportPayload(
     }
   }
 
+  let restoredCodexAccountId: string | null = null;
   for (const importedCodex of payload.codex) {
     const existing = findMatchingCodexAccount(
       existingCodexByIdentityKey,
@@ -364,24 +409,37 @@ async function applyPortableImportPayload(
       throw new Error(`IMPORT_CODEX_AUTH_MISSING|${importedCodex.record.accountId}`);
     }
 
-    await CodexAccountStore.upsertAccount({
+    const savedRecord = await CodexAccountStore.upsertAccount({
       existingId: existing?.id ?? null,
       accountId: importedCodex.record.accountId,
       email: importedCodex.record.email ?? existing?.email ?? null,
       label: importedCodex.record.label ?? existing?.label ?? null,
       authMode: importedCodex.record.authMode ?? existing?.authMode ?? null,
+      hydrationState: 'needs_import_restore',
       workspace: importedCodex.record.workspace ?? existing?.workspace ?? null,
       authFile,
       snapshot:
         importedCodex.snapshot ?? importedCodex.record.snapshot ?? existing?.snapshot ?? null,
-      makeActive: Boolean(existing?.isActive),
+      makeActive: false,
     });
+
+    if (codexRestoreSelection.selected === importedCodex) {
+      restoredCodexAccountId = savedRecord.id;
+    }
 
     if (existing) {
       result.imported.codexUpdated += 1;
     } else {
       result.imported.codexCreated += 1;
     }
+  }
+
+  if (restoredCodexAccountId) {
+    const codexRestore = await ManagedIdeService.restoreImportedCodexAccount(restoredCodexAccountId);
+    result.codexRestore = {
+      ...codexRestore,
+      warnings: [...codexRestore.warnings, ...codexRestoreSelection.warnings],
+    };
   }
 
   return result;
@@ -560,7 +618,10 @@ export async function importBundleApply(input: { previewId: string }): Promise<I
       target: path.basename(cached.filePath),
       outcome: 'success',
       message: 'Portable import bundle applied.',
-      metadata: result.imported,
+      metadata: {
+        ...result.imported,
+        codexRestore: result.codexRestore,
+      },
     });
     importPreviewCache.delete(input.previewId);
     cleanupManagerStorageBackup(backupDir);

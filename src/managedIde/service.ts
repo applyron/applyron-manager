@@ -2,13 +2,15 @@ import { ConfigManager } from '../ipc/config/manager';
 import { getManagedIdeTarget, getVisibleManagedIdeTargets } from './registry';
 import type {
   CodexAccountRecord,
+  CodexImportRestoreResult,
+  CodexRuntimeSyncResult,
   ManagedIdeCurrentStatus,
   ManagedIdeInstallationStatus,
   ManagedIdeRuntimeTarget,
   ManagedIdeTargetId,
 } from './types';
 import { isManagedIdeProcessRunning } from '../ipc/process/handler';
-import { getManagedIdeExecutablePath } from '../utils/paths';
+import { getManagedIdeExecutablePath, isWsl } from '../utils/paths';
 import { VscodeCodexAdapter } from './vscodeCodexAdapter';
 
 const vscodeCodexAdapter = new VscodeCodexAdapter();
@@ -50,6 +52,10 @@ async function createAntigravityStatus(): Promise<ManagedIdeCurrentStatus> {
     isProcessRunning: await isManagedIdeProcessRunning('antigravity'),
     lastUpdatedAt,
     fromCache: false,
+    activeRuntimeId: null,
+    requiresRuntimeSelection: false,
+    hasRuntimeMismatch: false,
+    runtimes: [],
   };
 }
 
@@ -60,7 +66,7 @@ export class ManagedIdeService {
 
   static async listTargets(): Promise<ManagedIdeRuntimeTarget[]> {
     const targets = getVisibleManagedIdeTargets().filter((target) => {
-      if (target.id === 'vscode-codex' && process.platform !== 'win32') {
+      if (target.id === 'vscode-codex' && process.platform !== 'win32' && !isWsl()) {
         return false;
       }
       return true;
@@ -143,8 +149,16 @@ export class ManagedIdeService {
     return account;
   }
 
+  static async restoreImportedCodexAccount(id: string | null): Promise<CodexImportRestoreResult> {
+    return vscodeCodexAdapter.restoreImportedAccount(id);
+  }
+
   static async deleteCodexAccount(id: string): Promise<void> {
     await vscodeCodexAdapter.deleteAccount(id);
+  }
+
+  static async syncCodexRuntimeState(): Promise<CodexRuntimeSyncResult> {
+    return vscodeCodexAdapter.syncRuntimeState();
   }
 
   static async openIde(targetId?: ManagedIdeTargetId): Promise<void> {

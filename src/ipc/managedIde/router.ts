@@ -7,6 +7,7 @@ import {
 import { ManagedIdeService } from '../../managedIde/service';
 import {
   CodexAccountRecordSchema,
+  CodexRuntimeSyncResultSchema,
   ManagedIdeCurrentStatusSchema,
   ManagedIdeRuntimeTargetSchema,
 } from '../../managedIde/schemas';
@@ -320,4 +321,36 @@ export const managedIdeRouter = os.router({
         throw toManagedIdeRpcError(error);
       }
     }),
+
+  syncCodexRuntimeState: os.output(CodexRuntimeSyncResultSchema).handler(async () => {
+    try {
+      const result = await ManagedIdeService.syncCodexRuntimeState();
+      ActivityLogService.record({
+        category: 'codex',
+        action: 'sync-runtime',
+        target: `${result.sourceRuntimeId}->${result.targetRuntimeId}`,
+        outcome: result.warnings.length > 0 ? 'info' : 'success',
+        message:
+          result.warnings.length > 0
+            ? `Codex runtime sync completed with warnings: ${result.warnings.join(', ')}`
+            : 'Codex runtime sync completed.',
+        metadata: {
+          sourceRuntimeId: result.sourceRuntimeId,
+          targetRuntimeId: result.targetRuntimeId,
+          syncedAuthFile: result.syncedAuthFile,
+          syncedExtensionState: result.syncedExtensionState,
+        },
+      });
+      return result;
+    } catch (error) {
+      ActivityLogService.record({
+        category: 'codex',
+        action: 'sync-runtime',
+        target: 'codex-runtime',
+        outcome: 'failure',
+        message: error instanceof Error ? error.message : 'Codex runtime sync failed.',
+      });
+      throw toManagedIdeRpcError(error);
+    }
+  }),
 });

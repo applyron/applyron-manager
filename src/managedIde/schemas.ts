@@ -11,6 +11,8 @@ export const ManagedIdeAvailabilityReasonSchema = z.enum([
   'unknown_error',
 ]);
 
+export const CodexRuntimeIdSchema = z.enum(['windows-local', 'wsl-remote']);
+
 export const ManagedIdeQuotaWindowSchema = z.object({
   usedPercent: z.number(),
   resetsAt: z.number().nullable(),
@@ -57,6 +59,21 @@ export const ManagedIdeInstallationStatusSchema = z.object({
   extensionId: z.string().nullable(),
 });
 
+export const ManagedIdeCodexRuntimeStatusSchema = z.object({
+  id: CodexRuntimeIdSchema,
+  displayName: z.string(),
+  installation: ManagedIdeInstallationStatusSchema,
+  session: ManagedIdeSessionSnapshotSchema,
+  quota: ManagedIdeQuotaSnapshotSchema.nullable(),
+  quotaByLimitId: z.record(z.string(), ManagedIdeQuotaSnapshotSchema).nullable(),
+  authFilePath: z.string().nullable(),
+  stateDbPath: z.string().nullable(),
+  storagePath: z.string().nullable(),
+  authLastUpdatedAt: z.number().nullable(),
+  extensionStateUpdatedAt: z.number().nullable(),
+  lastUpdatedAt: z.number(),
+});
+
 export const ManagedIdeCurrentStatusSchema = z.object({
   targetId: z.enum(['antigravity', 'vscode-codex']),
   installation: ManagedIdeInstallationStatusSchema,
@@ -66,6 +83,10 @@ export const ManagedIdeCurrentStatusSchema = z.object({
   isProcessRunning: z.boolean(),
   lastUpdatedAt: z.number(),
   fromCache: z.boolean(),
+  activeRuntimeId: CodexRuntimeIdSchema.nullable(),
+  requiresRuntimeSelection: z.boolean(),
+  hasRuntimeMismatch: z.boolean(),
+  runtimes: z.array(ManagedIdeCodexRuntimeStatusSchema),
 });
 
 export const ManagedIdeRuntimeTargetSchema = z.object({
@@ -124,4 +145,27 @@ export const CodexAccountRecordSchema = z.object({
   updatedAt: z.number(),
   lastRefreshedAt: z.number().nullable(),
   snapshot: CodexAccountSnapshotSchema.nullable(),
+});
+
+export const CodexRuntimeSyncResultSchema = z.object({
+  sourceRuntimeId: CodexRuntimeIdSchema,
+  targetRuntimeId: CodexRuntimeIdSchema,
+  syncedAuthFile: z.boolean(),
+  syncedExtensionState: z.boolean(),
+  warnings: z.array(z.string()),
+});
+
+export const CodexImportRestoreStatusSchema = z.enum([
+  'applied',
+  'stored_only_runtime_selection_required',
+  'stored_only_runtime_unavailable',
+  'skipped_no_active_codex',
+]);
+
+export const CodexImportRestoreResultSchema = z.object({
+  restoredAccountId: z.string().nullable(),
+  appliedRuntimeId: CodexRuntimeIdSchema.nullable(),
+  didRestartIde: z.boolean(),
+  status: CodexImportRestoreStatusSchema,
+  warnings: z.array(z.string()),
 });

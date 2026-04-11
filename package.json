@@ -1,7 +1,7 @@
 {
   "name": "applyron-manager",
   "productName": "Applyron Manager",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Applyron Manager - Electron App",
   "main": ".vite/build/main.js",
   "private": true,

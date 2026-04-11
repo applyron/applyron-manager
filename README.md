@@ -13,6 +13,7 @@ For the Turkish version of this document, see [README.tr.md](README.tr.md).
 
 - Manage multiple Antigravity accounts and local backups from one desktop UI.
 - Monitor VS Code Codex installation status, sessions, and quota snapshots.
+- Restore the active Codex account from portable imports back into the live runtime when possible.
 - Run a local OpenAI/Anthropic-compatible proxy with configurable routing.
 - Track update state, service health, and dashboard announcements in-app.
 - Preserve compatibility with legacy Antigravity storage locations while using Applyron Manager branding for new local data.
@@ -21,8 +22,9 @@ For the Turkish version of this document, see [README.tr.md](README.tr.md).
 
 - Node.js 22 or newer
 - npm
-- Windows is recommended for full feature coverage
-- VS Code Codex integration currently targets Windows stable VS Code with the official `openai.chatgpt` extension
+- Windows is the official release target
+- VS Code Codex integration targets Windows stable VS Code with the official `openai.chatgpt` extension
+- Remote-WSL is supported when the Windows host VS Code and the WSL-side extension/runtime are both available
 
 ## Development
 
@@ -69,12 +71,11 @@ npm run install:release-tools -- --platform=win32 --arch=x64
 npm run make -- --platform=win32 --arch=x64
 ```
 
-On Windows, the primary distribution path is the Squirrel `Setup.exe` package. MSI output is optional and only generated when the required packaging toolchain is available.
+Official published release artifacts are Windows installers for `x64` and `arm64`. The primary distribution path is the Squirrel `Setup.exe` package. MSI output is optional and only generated when the required packaging toolchain is available.
 
 ## Update Behavior
 
-- Packaged Windows and macOS builds support the managed in-app update flow.
-- Linux builds remain manual-update only.
+- Packaged Windows builds support the managed in-app update flow.
 - Development builds do not use the production updater flow.
 
 Internal infrastructure details, deployment hosts, and environment-specific configuration are intentionally omitted from this public README.
@@ -87,7 +88,7 @@ The repository includes automated workflows for:
 - unit test validation
 - packaged smoke validation
 - release automation
-- publish and update distribution
+- Windows publish and update distribution
 
 The exact infrastructure configuration, deployment credentials, and environment wiring are intentionally kept out of this public document.
 

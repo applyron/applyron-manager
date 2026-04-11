@@ -14,6 +14,7 @@ import type {
 } from '../types/dashboard';
 import type {
   CodexAccountRecord,
+  CodexRuntimeSyncResult,
   ManagedIdeCurrentStatus,
   ManagedIdeRuntimeTarget,
   ManagedIdeTargetId,
@@ -225,6 +226,7 @@ export interface IPCClient {
     refreshAllCodexAccounts(): Promise<CodexAccountRecord[]>;
     activateCodexAccount(input: { id: string }): Promise<CodexAccountRecord>;
     deleteCodexAccount(input: { id: string }): Promise<void>;
+    syncCodexRuntimeState(): Promise<CodexRuntimeSyncResult>;
   };
   system: {
     openLogDirectory(): Promise<void>;

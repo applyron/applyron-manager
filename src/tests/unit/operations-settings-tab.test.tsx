@@ -71,6 +71,16 @@ vi.mock('react-i18next', () => ({
         'settings.operations.import.previewFailedTitle': 'Import preview failed',
         'settings.operations.import.previewFailedDescription':
           'The portable bundle preview could not be prepared.',
+        'settings.operations.import.restoreApplied':
+          `The active Codex account was restored to ${String(options?.runtime ?? '')}.`,
+        'settings.operations.import.restoreStoredOnlyRuntimeSelectionRequired':
+          'The active Codex account was imported into the pool, but live restore is waiting for you to choose a Codex runtime.',
+        'settings.operations.import.restoreStoredOnlyRuntimeUnavailable':
+          'The active Codex account was imported into the pool, but live restore could not run because the Codex runtime is unavailable on this device.',
+        'settings.operations.import.restoreSkippedNoActiveCodex':
+          'The bundle did not mark an active Codex account to restore.',
+        'settings.operations.import.restoreWarningMultipleActive':
+          'Multiple active Codex records were found in the bundle, so the freshest one was selected.',
         'settings.operations.activity.title': 'Activity Log',
         'settings.operations.activity.description': 'Structured operator events.',
         'settings.operations.activity.loading': 'Loading recent activity...',
@@ -90,6 +100,8 @@ vi.mock('react-i18next', () => ({
         'settings.operations.activity.categories.update': 'Update',
         'settings.operations.activity.categories.operations': 'Operations',
         'action.openLogs': 'Open Log Directory',
+        'managedIde.runtimes.windowsLocal': 'Windows Local',
+        'managedIde.runtimes.wslRemote': 'WSL Remote',
       };
 
       if (key === 'settings.operations.export.successDescription') {
@@ -194,6 +206,13 @@ describe('OperationsSettingsTab', () => {
         codexCreated: 1,
         codexUpdated: 0,
       },
+      codexRestore: {
+        restoredAccountId: 'codex-1',
+        appliedRuntimeId: 'windows-local',
+        didRestartIde: true,
+        status: 'applied',
+        warnings: [],
+      },
     });
   });
 
@@ -233,5 +252,13 @@ describe('OperationsSettingsTab', () => {
     await waitFor(() => {
       expect(mockApplyImportBundle).toHaveBeenCalledWith({ previewId: 'preview-1' });
     });
+
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Portable bundle imported',
+        description:
+          'Imported 1 legacy, 2 cloud, and 1 Codex records. The active Codex account was restored to Windows Local.',
+      }),
+    );
   });
 });

@@ -19,12 +19,15 @@ import type {
   CodexWorkspaceSummary,
 } from './types';
 
+type CodexAccountHydrationState = 'live' | 'needs_import_restore';
+
 interface PersistedCodexAccountRow {
   id: string;
   email: string | null;
   label: string | null;
   accountId: string;
   authMode: string | null;
+  hydrationState: CodexAccountHydrationState;
   workspaceId: string | null;
   workspaceTitle: string | null;
   workspaceRole: string | null;
@@ -138,12 +141,14 @@ function getRowIdentityKey(
   });
 }
 
-function normalizeStoredRows(rows: PersistedCodexAccountRow[]): PersistedCodexAccountRow[] {
+function normalizeStoredRows(rows: CodexAccountRow[]): PersistedCodexAccountRow[] {
   const preferredByIdentityKey = new Map<string, PersistedCodexAccountRow>();
 
   for (const row of rows) {
     const normalizedRow: PersistedCodexAccountRow = {
       ...row,
+      hydrationState:
+        row.hydrationState === 'needs_import_restore' ? 'needs_import_restore' : 'live',
       workspaceId: row.workspaceId ?? null,
       workspaceTitle: row.workspaceTitle ?? null,
       workspaceRole: row.workspaceRole ?? null,
@@ -151,7 +156,7 @@ function normalizeStoredRows(rows: PersistedCodexAccountRow[]): PersistedCodexAc
       identityKey: getRowIdentityKey(row),
     };
     const existing = preferredByIdentityKey.get(normalizedRow.identityKey);
-    if (!existing || compareRowFreshness(row, existing) < 0) {
+    if (!existing || compareRowFreshness(normalizedRow, existing) < 0) {
       preferredByIdentityKey.set(normalizedRow.identityKey, normalizedRow);
     }
   }
@@ -169,7 +174,7 @@ function normalizeStoredRows(rows: PersistedCodexAccountRow[]): PersistedCodexAc
 }
 
 function getExistingRowByIdentityKey(
-  rows: PersistedCodexAccountRow[],
+  rows: CodexAccountRow[],
   identityKey: string,
 ): PersistedCodexAccountRow | null {
   return normalizeStoredRows(rows).find((row) => row.identityKey === identityKey) ?? null;
@@ -303,6 +308,7 @@ export interface UpsertCodexAccountInput {
   label?: string | null;
   accountId: string;
   authMode: string | null;
+  hydrationState?: CodexAccountHydrationState;
   workspace: CodexWorkspaceSummary | null;
   authFile: CodexAuthFile;
   snapshot: CodexAccountSnapshot | null;
@@ -454,6 +460,8 @@ export class CodexAccountStore {
     const encryptedAuthJson = await encrypt(JSON.stringify(input.authFile));
     const now = Date.now();
     const id = existing?.id ?? uuidv4();
+    const existingHydrationState = existing ? await this.getHydrationState(existing.id) : 'live';
+    const hydrationState = input.hydrationState ?? existingHydrationState ?? 'live';
 
     return runWithFallback(
       async () => {
@@ -472,6 +480,7 @@ export class CodexAccountStore {
               label: input.label ?? existing?.label ?? null,
               accountId: input.accountId,
               authMode: input.authMode,
+              hydrationState,
               workspaceId: input.workspace?.id ?? null,
               workspaceTitle: input.workspace?.title ?? null,
               workspaceRole: input.workspace?.role ?? null,
@@ -541,6 +550,7 @@ export class CodexAccountStore {
           label: input.label ?? existingRow?.label ?? null,
           accountId: input.accountId,
           authMode: input.authMode,
+          hydrationState,
           workspaceId: input.workspace?.id ?? null,
           workspaceTitle: input.workspace?.title ?? null,
           workspaceRole: input.workspace?.role ?? null,
@@ -591,6 +601,67 @@ export class CodexAccountStore {
                 ...row,
                 snapshotJson: snapshot ? JSON.stringify(snapshot) : null,
                 lastRefreshedAt: snapshot?.lastUpdatedAt ?? null,
+                updatedAt: now,
+              }
+            : row,
+        );
+        writeFallbackRows(nextRows);
+      },
+    );
+  }
+
+  static async getHydrationState(id: string): Promise<CodexAccountHydrationState | null> {
+    return runWithFallback(
+      async () => {
+        const { raw, orm } = getDb();
+        try {
+          const row = orm
+            .select({ hydrationState: codexAccounts.hydrationState })
+            .from(codexAccounts)
+            .where(eq(codexAccounts.id, id))
+            .get();
+          if (!row?.hydrationState) {
+            return null;
+          }
+          return row.hydrationState === 'needs_import_restore' ? 'needs_import_restore' : 'live';
+        } finally {
+          raw.close();
+        }
+      },
+      async () => {
+        const row = readFallbackRows().find((item) => item.id === id);
+        if (!row) {
+          return null;
+        }
+        return row.hydrationState === 'needs_import_restore' ? 'needs_import_restore' : 'live';
+      },
+    );
+  }
+
+  static async setHydrationState(id: string, hydrationState: CodexAccountHydrationState): Promise<void> {
+    return runWithFallback(
+      async () => {
+        const { raw, orm } = getDb();
+        try {
+          orm
+            .update(codexAccounts)
+            .set({
+              hydrationState,
+              updatedAt: Date.now(),
+            })
+            .where(eq(codexAccounts.id, id))
+            .run();
+        } finally {
+          raw.close();
+        }
+      },
+      async () => {
+        const now = Date.now();
+        const nextRows = readFallbackRows().map((row) =>
+          row.id === id
+            ? {
+                ...row,
+                hydrationState,
                 updatedAt: now,
               }
             : row,

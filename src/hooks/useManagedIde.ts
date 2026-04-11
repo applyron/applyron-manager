@@ -13,6 +13,7 @@ import {
   refreshAllCodexAccounts,
   refreshCodexAccount,
   refreshManagedIdeCurrentStatus,
+  syncCodexRuntimeState,
 } from '@/actions/managedIde';
 import { sortCodexAccounts } from '@/managedIde/codexAccounts';
 import type { CodexAccountRecord, ManagedIdeTargetId } from '@/managedIde/types';
@@ -227,6 +228,29 @@ export function useDeleteCodexAccount() {
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
         }),
+      ]);
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.refetchQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        }),
+      ]);
+    },
+  });
+}
+
+export function useSyncCodexRuntimeState() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: syncCodexRuntimeState,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        }),
+        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.targets }),
       ]);
       await Promise.all([
         queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),

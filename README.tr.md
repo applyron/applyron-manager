@@ -13,6 +13,7 @@ Bu belgenin Ingilizce surumu icin [README.md](README.md) dosyasina bakin.
 
 - Birden fazla Antigravity hesabini ve yerel yedeklerini tek masaustu arayuzunden yonetin.
 - VS Code Codex kurulum durumunu, oturumlarini ve kota snapshot'larini izleyin.
+- Tasinabilir import sonrasinda etkin Codex hesabini uygun oldugunda tekrar canli runtime tarafina geri yukleyin.
 - Yapilandirilabilir yonlendirme ile yerel bir OpenAI/Anthropic uyumlu proxy calistirin.
 - Uygulama icinden guncelleme durumu, servis sagligi ve dashboard duyurularini takip edin.
 - Yeni yerel verilerde Applyron Manager adlandirmasini kullanirken eski Antigravity depolama yollariyla uyumlulugu koruyun.
@@ -21,8 +22,9 @@ Bu belgenin Ingilizce surumu icin [README.md](README.md) dosyasina bakin.
 
 - Node.js 22 veya uzeri
 - npm
-- Tam ozellik kapsami icin Windows onerilir
-- VS Code Codex entegrasyonu su anda Windows stable VS Code ve resmi `openai.chatgpt` uzantisini hedefler
+- Resmi release hedefi Windows'tur
+- VS Code Codex entegrasyonu Windows stable VS Code ve resmi `openai.chatgpt` uzantisini hedefler
+- Remote-WSL senaryosu, Windows host VS Code ve WSL tarafindaki uzanti/runtime birlikte mevcutsa desteklenir
 
 ## Gelistirme
 
@@ -69,12 +71,11 @@ npm run install:release-tools -- --platform=win32 --arch=x64
 npm run make -- --platform=win32 --arch=x64
 ```
 
-Windows tarafinda ana dagitim kanali Squirrel tabanli `Setup.exe` paketidir. MSI cikisi opsiyoneldir ve gerekli paketleme araci varsa uretilir.
+Resmi yayinlanan release asset'leri `x64` ve `arm64` icin Windows kurucularidir. Ana dagitim kanali Squirrel tabanli `Setup.exe` paketidir. MSI cikisi opsiyoneldir ve gerekli paketleme araci varsa uretilir.
 
 ## Guncelleme Davranisi
 
-- Packaged Windows ve macOS build'leri yonetilen uygulama ici guncelleme akisina sahiptir.
-- Linux build'lerinde guncelleme manuel kalir.
+- Packaged Windows build'leri yonetilen uygulama ici guncelleme akisina sahiptir.
 - Gelistirme build'leri production updater akisina girmez.
 
 Ic altyapi detaylari, deploy host bilgileri ve ortama ozel konfigurationslar bu public README icine bilincli olarak yazilmamistir.
@@ -87,7 +88,7 @@ Repoda su otomasyon yuzeyleri bulunur:
 - unit test dogrulamasi
 - packaged smoke dogrulamasi
 - release otomasyonu
-- publish ve update dagitimi
+- Windows publish ve update dagitimi
 
 Altyapi kurulumu, deploy kimlik bilgileri ve ortam baglantilari bu public dokumanin disinda tutulur.
 

@@ -5,6 +5,7 @@ import {
   CodexAccountRecordSchema,
   CodexAuthFileSchema,
   CodexAccountSnapshotSchema,
+  CodexImportRestoreResultSchema,
 } from '../managedIde/schemas';
 import { ServiceHealthItemSchema } from './dashboard';
 
@@ -176,6 +177,7 @@ export const ImportApplyResultSchema = z.object({
     codexCreated: z.number(),
     codexUpdated: z.number(),
   }),
+  codexRestore: CodexImportRestoreResultSchema,
 });
 export type ImportApplyResult = z.infer<typeof ImportApplyResultSchema>;
 

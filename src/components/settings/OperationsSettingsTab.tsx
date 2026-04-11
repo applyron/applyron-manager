@@ -28,6 +28,7 @@ import { openLogDirectory } from '@/actions/system';
 import type {
   ActivityEvent,
   ActivityEventCategory,
+  ImportApplyResult,
   ImportPreviewSummary,
 } from '@/types/operations';
 import { getLocalizedErrorMessage } from '@/utils/errorMessages';
@@ -59,6 +60,47 @@ function getCategoryLabel(
   category: ActivityEventCategory,
 ): string {
   return t(`settings.operations.activity.categories.${category}`);
+}
+
+function getCodexImportRestoreSummary(
+  result: ImportApplyResult,
+  t: ReturnType<typeof useTranslation>['t'],
+): string | null {
+  const codexImported = result.imported.codexCreated + result.imported.codexUpdated;
+  if (codexImported === 0) {
+    return null;
+  }
+
+  switch (result.codexRestore.status) {
+    case 'applied':
+      return t('settings.operations.import.restoreApplied', {
+        runtime:
+          result.codexRestore.appliedRuntimeId === 'wsl-remote'
+            ? t('managedIde.runtimes.wslRemote')
+            : t('managedIde.runtimes.windowsLocal'),
+      });
+    case 'stored_only_runtime_selection_required':
+      return t('settings.operations.import.restoreStoredOnlyRuntimeSelectionRequired');
+    case 'stored_only_runtime_unavailable':
+      return t('settings.operations.import.restoreStoredOnlyRuntimeUnavailable');
+    case 'skipped_no_active_codex':
+      return t('settings.operations.import.restoreSkippedNoActiveCodex');
+    default:
+      return null;
+  }
+}
+
+function getCodexImportRestoreWarnings(
+  result: ImportApplyResult,
+  t: ReturnType<typeof useTranslation>['t'],
+): string[] {
+  return result.codexRestore.warnings.map((warning) => {
+    if (warning === 'CODEX_IMPORT_MULTIPLE_ACTIVE_IMPORTED_ACCOUNTS') {
+      return t('settings.operations.import.restoreWarningMultipleActive');
+    }
+
+    return warning;
+  });
 }
 
 export function OperationsSettingsTab({
@@ -151,11 +193,17 @@ export function OperationsSettingsTab({
       ]);
       toast({
         title: t('settings.operations.import.successTitle'),
-        description: t('settings.operations.import.successDescription', {
-          legacy: result.imported.legacyCreated + result.imported.legacyUpdated,
-          cloud: result.imported.cloudCreated + result.imported.cloudUpdated,
-          codex: result.imported.codexCreated + result.imported.codexUpdated,
-        }),
+        description: [
+          t('settings.operations.import.successDescription', {
+            legacy: result.imported.legacyCreated + result.imported.legacyUpdated,
+            cloud: result.imported.cloudCreated + result.imported.cloudUpdated,
+            codex: result.imported.codexCreated + result.imported.codexUpdated,
+          }),
+          getCodexImportRestoreSummary(result, t),
+          ...getCodexImportRestoreWarnings(result, t),
+        ]
+          .filter((message): message is string => Boolean(message))
+          .join(' '),
       });
       closeImportDialog();
     },

@@ -1,7 +1,8 @@
 export const enManagedIde = {
   managedIde: {
     title: 'VS Code Codex',
-    description: 'Monitor the official OpenAI VS Code extension and its live Codex session.',
+    description:
+      'Monitor Windows Local and Remote-WSL Codex runtimes through the official OpenAI VS Code extension.',
     badges: {
       cached: 'Cached',
       running: 'Running',
@@ -13,7 +14,8 @@ export const enManagedIde = {
     },
     availability: {
       ready: 'Ready',
-      unsupported_platform: 'This integration is only available on Windows.',
+      unsupported_platform:
+        'This integration is available on Windows and WSL when paired with Windows VS Code.',
       ide_not_found: 'VS Code stable installation was not found.',
       extension_not_found: 'The official OpenAI VS Code extension was not found.',
       codex_cli_not_found: 'The bundled Codex CLI could not be found.',
@@ -52,6 +54,7 @@ export const enManagedIde = {
       extensionPath: 'Extension path',
       accountType: 'Account type',
       authMode: 'Auth mode',
+      activeRuntime: 'Active runtime',
       requiresOpenaiAuth: 'Requires OpenAI auth',
       primaryWindow: 'Primary window',
       secondaryWindow: 'Secondary window',
@@ -59,6 +62,10 @@ export const enManagedIde = {
       limitName: 'Current limit',
       resetsAt: 'Resets at',
       additionalLimits: 'Additional limits',
+    },
+    runtimes: {
+      windowsLocal: 'Windows Local',
+      wslRemote: 'WSL Remote',
     },
     empty: {
       noAccount: 'No signed-in account detected',

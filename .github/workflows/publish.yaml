@@ -30,12 +30,6 @@ jobs:
           - os: windows-latest
             platform: win32
             arch: x64
-          - os: macos-15-intel
-            platform: darwin
-            arch: x64
-          - os: macos-14
-            platform: darwin
-            arch: arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -186,18 +180,6 @@ jobs:
           - os: windows-11-arm
             platform: win32
             arch: arm64
-          - os: macos-15-intel
-            platform: darwin
-            arch: x64
-          - os: macos-14
-            platform: darwin
-            arch: arm64
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-          - os: ubuntu-24.04-arm
-            platform: linux
-            arch: arm64
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -214,12 +196,6 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fakeroot rpm libsecret-1-dev pkg-config
 
       - name: Ensure WiX Toolset
         if: matrix.platform == 'win32' && matrix.arch == 'x64'
@@ -255,32 +231,17 @@ jobs:
         run: npm run install:release-tools -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
 
       - name: Make Artifacts
-        if: matrix.platform != 'darwin'
         env:
           NODE_OPTIONS: --max-old-space-size=8192
           APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
           APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
         run: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
 
-      - name: Make Artifacts (darwin with retry)
-        if: matrix.platform == 'darwin'
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 3
-          timeout_minutes: 20
-          retry_wait_seconds: 20
-          command: npm run make -- --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-          APPLYRON_GOOGLE_CLIENT_ID: ${{ secrets.APPLYRON_GOOGLE_CLIENT_ID }}
-          APPLYRON_GOOGLE_CLIENT_SECRET: ${{ secrets.APPLYRON_GOOGLE_CLIENT_SECRET }}
-
       - name: Prepare static update bundle
-        if: matrix.platform != 'linux'
         run: node scripts/prepare-static-update-assets.mjs out/make release-assets-static
 
       - name: Configure SSH for update server
-        if: env.SHOULD_PUBLISH == 'true' && matrix.platform != 'linux'
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         env:
           UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
@@ -300,7 +261,7 @@ jobs:
           printf 'UPDATE_SERVER_KNOWN_HOSTS=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_ENV"
 
       - name: Upload static update subtree to server
-        if: env.SHOULD_PUBLISH == 'true' && matrix.platform != 'linux'
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         env:
           UPDATE_SERVER_HOST: ${{ vars.UPDATE_SERVER_HOST }}
@@ -336,10 +297,6 @@ jobs:
             files+=("$file")
           done < <(find out/make -type f \( \
             -name '*.exe' -o \
-            -name '*.dmg' -o \
-            -name '*.AppImage' -o \
-            -name '*.deb' -o \
-            -name '*.rpm' -o \
             -name '*.msi' \
           \) | sort)
 
@@ -458,25 +415,6 @@ jobs:
             fi
           done
 
-          for arch in x64 arm64; do
-            remote_arch_path="$UPDATE_SERVER_PATH/darwin/$arch"
-            zip_name="$(ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "find '$remote_arch_path' -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | sort | head -n 1")"
-            dmg_name="$(ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "find '$remote_arch_path' -maxdepth 1 -type f -name '*.dmg' -printf '%f\n' | sort | head -n 1")"
-
-            if [ -z "$zip_name" ]; then
-              echo "::error::Missing required macOS zip for arch ${arch}"
-              exit 1
-            fi
-
-            ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "test -f '$remote_arch_path/RELEASES.json' && test -f '$remote_arch_path/$zip_name'"
-            curl -fsS "${public_base_url}/darwin/${arch}/RELEASES.json" -o /dev/null
-            curl -fsS "${public_base_url}/darwin/${arch}/${zip_name}" -o /dev/null
-
-            if [ -n "$dmg_name" ]; then
-              ssh -i "$UPDATE_SERVER_SSH_KEY" -o UserKnownHostsFile="$UPDATE_SERVER_KNOWN_HOSTS" -o StrictHostKeyChecking=yes -p "$port" "$UPDATE_SERVER_USER@$UPDATE_SERVER_HOST" "test -f '$remote_arch_path/$dmg_name'"
-            fi
-          done
-
   dry-run-summary:
     name: Dry Run Summary
     needs: [prepare-dry-run, publish-build]
@@ -485,4 +423,4 @@ jobs:
     steps:
       - name: Summarize dry run
         run: |
-          echo "Dry run completed successfully. All platform builds finished without publishing release assets."
+          echo "Dry run completed successfully. All Windows builds finished without publishing release assets."

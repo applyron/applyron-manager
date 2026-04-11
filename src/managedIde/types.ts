@@ -1,4 +1,5 @@
 export type ManagedIdeTargetId = 'antigravity' | 'vscode-codex';
+export type CodexRuntimeId = 'windows-local' | 'wsl-remote';
 
 export interface ManagedIdeTargetCapabilities {
   accountStorageRead: boolean;
@@ -83,6 +84,21 @@ export interface ManagedIdeInstallationStatus {
   extensionId: string | null;
 }
 
+export interface ManagedIdeCodexRuntimeStatus {
+  id: CodexRuntimeId;
+  displayName: string;
+  installation: ManagedIdeInstallationStatus;
+  session: ManagedIdeSessionSnapshot;
+  quota: ManagedIdeQuotaSnapshot | null;
+  quotaByLimitId: Record<string, ManagedIdeQuotaSnapshot> | null;
+  authFilePath: string | null;
+  stateDbPath: string | null;
+  storagePath: string | null;
+  authLastUpdatedAt: number | null;
+  extensionStateUpdatedAt: number | null;
+  lastUpdatedAt: number;
+}
+
 export interface ManagedIdeCurrentStatus {
   targetId: ManagedIdeTargetId;
   installation: ManagedIdeInstallationStatus;
@@ -92,6 +108,10 @@ export interface ManagedIdeCurrentStatus {
   isProcessRunning: boolean;
   lastUpdatedAt: number;
   fromCache: boolean;
+  activeRuntimeId: CodexRuntimeId | null;
+  requiresRuntimeSelection: boolean;
+  hasRuntimeMismatch: boolean;
+  runtimes: ManagedIdeCodexRuntimeStatus[];
 }
 
 export interface ManagedIdeRuntimeTarget {
@@ -144,6 +164,28 @@ export interface CodexAccountRecord {
   updatedAt: number;
   lastRefreshedAt: number | null;
   snapshot: CodexAccountSnapshot | null;
+}
+
+export interface CodexRuntimeSyncResult {
+  sourceRuntimeId: CodexRuntimeId;
+  targetRuntimeId: CodexRuntimeId;
+  syncedAuthFile: boolean;
+  syncedExtensionState: boolean;
+  warnings: string[];
+}
+
+export type CodexImportRestoreStatus =
+  | 'applied'
+  | 'stored_only_runtime_selection_required'
+  | 'stored_only_runtime_unavailable'
+  | 'skipped_no_active_codex';
+
+export interface CodexImportRestoreResult {
+  restoredAccountId: string | null;
+  appliedRuntimeId: CodexRuntimeId | null;
+  didRestartIde: boolean;
+  status: CodexImportRestoreStatus;
+  warnings: string[];
 }
 
 export interface ManagedIdeAdapter {

@@ -128,6 +128,8 @@ export interface CodexAppServerSnapshot {
 export interface CodexAppServerClientOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  spawnCommand?: string;
+  spawnArgs?: string[];
 }
 
 export class CodexAppServerClient {
@@ -311,7 +313,10 @@ export class CodexAppServerClient {
       windowsHide: true,
     };
 
-    const child = spawn(this.executablePath, ['app-server'], {
+    const command = this.options.spawnCommand ?? this.executablePath;
+    const commandArgs = this.options.spawnArgs ?? ['app-server'];
+
+    const child = spawn(command, commandArgs, {
       ...spawnOptions,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
