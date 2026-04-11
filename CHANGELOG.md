@@ -4,6 +4,12 @@
 
 ## [1.0.3](https://github.com/applyron/applyron-manager/compare/v1.0.2...v1.0.3) (2026-04-11)
 
+### 🐛 Bug Fixes
+
+* resolve CI formatting and migration test failures ([5b5c62e](https://github.com/applyron/applyron-manager/commit/5b5c62e24226c14d51c817829f5d3287b92e3e89))
+
+## [1.0.3](https://github.com/applyron/applyron-manager/compare/v1.0.2...v1.0.3) (2026-04-11)
+
 ### 🚀 Features
 
 * ship Windows Local + Remote-WSL runtime support for VS Code Codex
