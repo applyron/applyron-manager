@@ -71,8 +71,7 @@ vi.mock('react-i18next', () => ({
         'settings.operations.import.previewFailedTitle': 'Import preview failed',
         'settings.operations.import.previewFailedDescription':
           'The portable bundle preview could not be prepared.',
-        'settings.operations.import.restoreApplied':
-          `The active Codex account was restored to ${String(options?.runtime ?? '')}.`,
+        'settings.operations.import.restoreApplied': `The active Codex account was restored to ${String(options?.runtime ?? '')}.`,
         'settings.operations.import.restoreStoredOnlyRuntimeSelectionRequired':
           'The active Codex account was imported into the pool, but live restore is waiting for you to choose a Codex runtime.',
         'settings.operations.import.restoreStoredOnlyRuntimeUnavailable':

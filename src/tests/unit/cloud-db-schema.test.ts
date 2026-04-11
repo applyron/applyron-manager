@@ -72,7 +72,7 @@ describe('ensureCloudDatabaseInitialized', () => {
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS accounts');
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS settings');
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS codex_accounts');
-    expect(executedSql).toContain('hydration_state TEXT NOT NULL DEFAULT \'live\'');
+    expect(executedSql).toContain("hydration_state TEXT NOT NULL DEFAULT 'live'");
     expect(executedSql).toContain('CREATE TABLE IF NOT EXISTS schema_migrations');
     expect(executedSql).toContain('idx_codex_accounts_identity_key');
     expect(executedSql).toContain('idx_codex_accounts_sort_order');

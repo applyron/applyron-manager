@@ -227,10 +227,8 @@ export const trCloud = {
         'Önce etkin Codex runtime tarafını seçin, ardından işlemi tekrar deneyin.',
       codexRuntimeSyncUnavailable:
         'WSL sync yalnızca Windows Local ve WSL Remote runtime birlikte kuruluysa kullanılabilir.',
-      codexRuntimeSyncAuthFailed:
-        'Hedef runtime tarafındaki auth dosyası güncellenemedi.',
-      codexRuntimeSyncStateFailed:
-        'Hedef runtime tarafındaki OpenAI uzantı durumu güncellenemedi.',
+      codexRuntimeSyncAuthFailed: 'Hedef runtime tarafındaki auth dosyası güncellenemedi.',
+      codexRuntimeSyncStateFailed: 'Hedef runtime tarafındaki OpenAI uzantı durumu güncellenemedi.',
       codexRuntimeSyncAuthSkipped:
         'Kaynak veya hedef auth dosyası eksik olduğu için auth verisi atlandı.',
       codexRuntimeSyncStateSkipped:

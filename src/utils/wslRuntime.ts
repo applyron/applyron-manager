@@ -109,11 +109,9 @@ export function getKnownWslAuthorities(): string[] {
   const authorities = new Set<string>();
 
   for (const folder of storage?.backupWorkspaces?.folders ?? []) {
-    const folderUriAuthority =
-      folder.folderUri?.startsWith('vscode-remote://wsl%2B')
-        ? decodeURIComponent(folder.folderUri.replace('vscode-remote://', '')).split('/')[0] ??
-          null
-        : null;
+    const folderUriAuthority = folder.folderUri?.startsWith('vscode-remote://wsl%2B')
+      ? (decodeURIComponent(folder.folderUri.replace('vscode-remote://', '')).split('/')[0] ?? null)
+      : null;
     const normalized =
       normalizeWslAuthority(folder.remoteAuthority) ?? normalizeWslAuthority(folderUriAuthority);
     if (normalized) {
@@ -222,5 +220,7 @@ export function resolveWslRuntimeHome(authorityHint?: string | null): WslRuntime
 }
 
 export function toAccessibleWslPath(distroName: string, linuxPath: string): string {
-  return process.platform === 'win32' ? getWindowsAccessibleWslPath(distroName, linuxPath) : linuxPath;
+  return process.platform === 'win32'
+    ? getWindowsAccessibleWslPath(distroName, linuxPath)
+    : linuxPath;
 }

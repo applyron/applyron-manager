@@ -869,7 +869,9 @@ export function CodexAccountPanel() {
           onClick={handleRefreshAll}
           title={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
           aria-label={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
-          disabled={refreshAllMutation.isPending || accounts.length === 0 || requiresRuntimeSelection}
+          disabled={
+            refreshAllMutation.isPending || accounts.length === 0 || requiresRuntimeSelection
+          }
           className="text-foreground hover:bg-accent/60 hover:text-primary border-[var(--hud-border-soft)] bg-[var(--hud-input-bg)]"
         >
           <RefreshCcw className={`h-4 w-4 ${refreshAllMutation.isPending ? 'animate-spin' : ''}`} />

@@ -333,10 +333,7 @@ function findOpenAiExtension(extensionsRoot: string | null): {
     : { extensionPath: null, extensionVersion: null };
 }
 
-function getCodexCliPath(
-  extensionPath: string | null,
-  runtimeId: CodexRuntimeId,
-): string | null {
+function getCodexCliPath(extensionPath: string | null, runtimeId: CodexRuntimeId): string | null {
   if (!extensionPath) {
     return null;
   }
@@ -536,7 +533,7 @@ function getPreferredTopLevelStatus(
 ): ManagedIdeCodexRuntimeStatus | null {
   const activeRuntime =
     (activeRuntimeId
-      ? runtimes.find((runtime) => runtime.id === activeRuntimeId) ?? null
+      ? (runtimes.find((runtime) => runtime.id === activeRuntimeId) ?? null)
       : null) ??
     runtimes.find((runtime) => runtime.installation.available) ??
     runtimes[0] ??
@@ -1018,9 +1015,12 @@ function normalizeExecOutput(output: Buffer | string): string {
 }
 
 function runWslShellCommand(distroName: string, command: string): string {
-  const output = execSync(`wsl.exe -d ${JSON.stringify(distroName)} sh -lc ${JSON.stringify(command)}`, {
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
+  const output = execSync(
+    `wsl.exe -d ${JSON.stringify(distroName)} sh -lc ${JSON.stringify(command)}`,
+    {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    },
+  );
   return normalizeExecOutput(output);
 }
 
@@ -1120,7 +1120,9 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   async getInstallationStatus(): Promise<ManagedIdeInstallationStatus> {
     const selection = this.resolveRuntimeSelection();
     return getMergedInstallationStatus(
-      selection.runtimes.map((runtime) => createUnavailableRuntimeStatus(runtime, runtime.installation.reason)),
+      selection.runtimes.map((runtime) =>
+        createUnavailableRuntimeStatus(runtime, runtime.installation.reason),
+      ),
       selection.activeRuntimeId,
     );
   }
@@ -1381,71 +1383,78 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
 
     try {
-      const status = await withTemporaryCodexHome(runtime, 'applyron-codex-probe-', async (codexHome) => {
-        writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome.hostPath));
+      const status = await withTemporaryCodexHome(
+        runtime,
+        'applyron-codex-probe-',
+        async (codexHome) => {
+          writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome.hostPath));
 
-        const client = this.createCodexClient(runtime, codexHome.runtimePath);
-        const snapshot = await client.collectSnapshot();
-        const rateLimits =
-          normalizeQuotaSnapshot(snapshot.rateLimits?.rateLimits) ||
-          normalizeQuotaSnapshot(snapshot.latestRateLimitsNotification?.rateLimits);
+          const client = this.createCodexClient(runtime, codexHome.runtimePath);
+          const snapshot = await client.collectSnapshot();
+          const rateLimits =
+            normalizeQuotaSnapshot(snapshot.rateLimits?.rateLimits) ||
+            normalizeQuotaSnapshot(snapshot.latestRateLimitsNotification?.rateLimits);
 
-        const rateLimitsByLimitId = snapshot.rateLimits?.rateLimitsByLimitId
-          ? Object.fromEntries(
-              Object.entries(snapshot.rateLimits.rateLimitsByLimitId)
-                .map(([limitId, limitSnapshot]) => [limitId, normalizeQuotaSnapshot(limitSnapshot)])
-                .filter((entry): entry is [string, ManagedIdeQuotaSnapshot] => entry[1] !== null),
-            )
-          : null;
+          const rateLimitsByLimitId = snapshot.rateLimits?.rateLimitsByLimitId
+            ? Object.fromEntries(
+                Object.entries(snapshot.rateLimits.rateLimitsByLimitId)
+                  .map(([limitId, limitSnapshot]) => [
+                    limitId,
+                    normalizeQuotaSnapshot(limitSnapshot),
+                  ])
+                  .filter((entry): entry is [string, ManagedIdeQuotaSnapshot] => entry[1] !== null),
+              )
+            : null;
 
-        const account = snapshot.account?.account ?? null;
-        const sessionState: ManagedIdeSessionSnapshot['state'] = account
-          ? 'ready'
-          : 'requires_login';
-        const planType =
-          account?.planType ??
-          rateLimits?.planType ??
-          snapshot.planTypeHint ??
-          (hints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
+          const account = snapshot.account?.account ?? null;
+          const sessionState: ManagedIdeSessionSnapshot['state'] = account
+            ? 'ready'
+            : 'requires_login';
+          const planType =
+            account?.planType ??
+            rateLimits?.planType ??
+            snapshot.planTypeHint ??
+            (hints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
 
-        return createRuntimeStatusSnapshot(runtime, {
-          installation: runtime.installation,
-          session: {
-            state: sessionState,
-            accountType: account?.type ?? null,
-            authMode:
-              normalizeManagedIdeAuthMode(snapshot.authMode) ??
-              normalizeManagedIdeAuthMode(snapshot.authStatus?.authMethod) ??
-              (account?.type === 'chatgpt'
-                ? 'chatgpt'
-                : account?.type === 'apiKey'
-                  ? 'apikey'
-                  : normalizeManagedIdeAuthMode(authFile.auth_mode)),
-            email: getPreferredCodexEmail(authFile, account?.email),
-            planType,
-            requiresOpenaiAuth:
-              snapshot.account?.requiresOpenaiAuth ??
-              snapshot.authStatus?.requiresOpenaiAuth ??
-              !account,
-            serviceTier: normalizeCodexServiceTier(
-              snapshot.config?.config?.service_tier ?? hints.defaultServiceTier,
-            ),
-            agentMode: normalizeCodexAgentMode(hints.agentMode),
+          return createRuntimeStatusSnapshot(runtime, {
+            installation: runtime.installation,
+            session: {
+              state: sessionState,
+              accountType: account?.type ?? null,
+              authMode:
+                normalizeManagedIdeAuthMode(snapshot.authMode) ??
+                normalizeManagedIdeAuthMode(snapshot.authStatus?.authMethod) ??
+                (account?.type === 'chatgpt'
+                  ? 'chatgpt'
+                  : account?.type === 'apiKey'
+                    ? 'apikey'
+                    : normalizeManagedIdeAuthMode(authFile.auth_mode)),
+              email: getPreferredCodexEmail(authFile, account?.email),
+              planType,
+              requiresOpenaiAuth:
+                snapshot.account?.requiresOpenaiAuth ??
+                snapshot.authStatus?.requiresOpenaiAuth ??
+                !account,
+              serviceTier: normalizeCodexServiceTier(
+                snapshot.config?.config?.service_tier ?? hints.defaultServiceTier,
+              ),
+              agentMode: normalizeCodexAgentMode(hints.agentMode),
+              lastUpdatedAt,
+            },
+            quota: rateLimits,
+            quotaByLimitId:
+              rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
+                ? rateLimitsByLimitId
+                : null,
+            authFilePath: runtime.authFilePath,
+            stateDbPath: runtime.stateDbPath,
+            storagePath: runtime.storagePath,
+            authLastUpdatedAt: runtime.authLastUpdatedAt,
+            extensionStateUpdatedAt: hints.updatedAt ?? runtime.extensionStateUpdatedAt,
             lastUpdatedAt,
-          },
-          quota: rateLimits,
-          quotaByLimitId:
-            rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
-              ? rateLimitsByLimitId
-              : null,
-          authFilePath: runtime.authFilePath,
-          stateDbPath: runtime.stateDbPath,
-          storagePath: runtime.storagePath,
-          authLastUpdatedAt: runtime.authLastUpdatedAt,
-          extensionStateUpdatedAt: hints.updatedAt ?? runtime.extensionStateUpdatedAt,
-          lastUpdatedAt,
-        });
-      });
+          });
+        },
+      );
 
       return status;
     } catch (error) {
@@ -1457,7 +1466,10 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   async getCurrentStatus(options?: { refresh?: boolean }): Promise<ManagedIdeCurrentStatus> {
     const selection = this.resolveRuntimeSelection();
     const cached = readCachedStatus();
-    const isProcessRunning = await this.resolveProcessRunningState(options, cached?.isProcessRunning);
+    const isProcessRunning = await this.resolveProcessRunningState(
+      options,
+      cached?.isProcessRunning,
+    );
 
     const shouldProbeLive =
       options?.refresh === true ||

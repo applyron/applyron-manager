@@ -398,31 +398,29 @@ function createRuntimeStatus(
   return {
     id: overrides?.id ?? 'windows-local',
     displayName: overrides?.displayName ?? 'Windows Local',
-    installation:
-      overrides?.installation ?? {
-        targetId: 'vscode-codex',
-        platformSupported: true,
-        available: true,
-        reason: 'ready',
-        idePath: codePath,
-        ideVersion: '1.99.0',
-        extensionPath,
-        extensionVersion: '26.300.0',
-        codexCliPath,
-        extensionId: 'openai.chatgpt',
-      },
-    session:
-      overrides?.session ?? {
-        state: 'ready',
-        accountType: 'chatgpt',
-        authMode: 'chatgpt',
-        email: 'admin@applyron.com',
-        planType: 'team',
-        requiresOpenaiAuth: true,
-        serviceTier: 'flex',
-        agentMode: 'full-access',
-        lastUpdatedAt: 123,
-      },
+    installation: overrides?.installation ?? {
+      targetId: 'vscode-codex',
+      platformSupported: true,
+      available: true,
+      reason: 'ready',
+      idePath: codePath,
+      ideVersion: '1.99.0',
+      extensionPath,
+      extensionVersion: '26.300.0',
+      codexCliPath,
+      extensionId: 'openai.chatgpt',
+    },
+    session: overrides?.session ?? {
+      state: 'ready',
+      accountType: 'chatgpt',
+      authMode: 'chatgpt',
+      email: 'admin@applyron.com',
+      planType: 'team',
+      requiresOpenaiAuth: true,
+      serviceTier: 'flex',
+      agentMode: 'full-access',
+      lastUpdatedAt: 123,
+    },
     quota: null,
     quotaByLimitId: null,
     authFilePath: defaultAuthPath,
@@ -450,10 +448,7 @@ describe('VscodeCodexAdapter', () => {
       },
     ]);
     mockReadFileSync.mockImplementation((filePath: string) => {
-      if (
-        filePath.includes('openai.chatgpt-') &&
-        filePath.endsWith(path.join('package.json'))
-      ) {
+      if (filePath.includes('openai.chatgpt-') && filePath.endsWith(path.join('package.json'))) {
         return JSON.stringify({ version: '26.318.11754' });
       }
 
@@ -546,7 +541,9 @@ describe('VscodeCodexAdapter', () => {
     mockGetActiveVsCodeWslAuthority.mockReturnValue(null);
     mockGetKnownWslAuthorities.mockReturnValue([]);
     mockResolveWslRuntimeHome.mockReturnValue(null);
-    mockToAccessibleWslPath.mockImplementation((_distro: string, runtimePath: string) => runtimePath);
+    mockToAccessibleWslPath.mockImplementation(
+      (_distro: string, runtimePath: string) => runtimePath,
+    );
     mockGetWindowsUser.mockReturnValue('ahmet');
     mockExecSync.mockImplementation(() => Buffer.from('/tmp/applyron-codex-probe-123'));
   });
@@ -1144,7 +1141,9 @@ describe('VscodeCodexAdapter', () => {
   it('uses a hard restart the first time an imported account is activated', async () => {
     mockGetHydrationState.mockResolvedValue('needs_import_restore');
     mockGetAccount
-      .mockResolvedValueOnce(createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }))
+      .mockResolvedValueOnce(
+        createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }),
+      )
       .mockResolvedValueOnce(
         createAccountRecord({
           id: 'codex-imported',
@@ -1212,7 +1211,9 @@ describe('VscodeCodexAdapter', () => {
       linuxHomePath: wslLinuxHome,
       accessibleHomePath: wslAccessibleHome,
     });
-    mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }));
+    mockGetAccount.mockResolvedValue(
+      createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }),
+    );
     mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-imported'));
 
     const adapter = new VscodeCodexAdapter();
@@ -1225,7 +1226,9 @@ describe('VscodeCodexAdapter', () => {
   });
 
   it('restores an imported active account with a full restart when the runtime is resolved', async () => {
-    mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }));
+    mockGetAccount.mockResolvedValue(
+      createAccountRecord({ id: 'codex-imported', accountId: 'acc-imported' }),
+    );
     mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-imported'));
 
     const adapter = new VscodeCodexAdapter();

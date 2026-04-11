@@ -223,7 +223,7 @@ describe('migration verification', () => {
 
     await CloudAccountRepo.init();
 
-    expect(appliedMigrationVersions).toEqual([1, 2, 3, 4, 5]);
+    expect(appliedMigrationVersions).toEqual([1, 2, 3, 4, 5, 6]);
     expect(mockCopyFileSync).toHaveBeenCalledWith(
       'D:\\temp\\cloud_accounts.db',
       'D:\\temp\\cloud_accounts.db.migration-backup',

@@ -86,7 +86,10 @@ function selectPortableImportActiveCodexRecord(payload: ApplyronPortableExportPa
 } {
   const activeRecords = payload.codex
     .filter((record) => record.record.isActive)
-    .sort((left, right) => getPortableCodexRecordFreshness(right) - getPortableCodexRecordFreshness(left));
+    .sort(
+      (left, right) =>
+        getPortableCodexRecordFreshness(right) - getPortableCodexRecordFreshness(left),
+    );
 
   if (activeRecords.length === 0) {
     return {
@@ -435,7 +438,8 @@ async function applyPortableImportPayload(
   }
 
   if (restoredCodexAccountId) {
-    const codexRestore = await ManagedIdeService.restoreImportedCodexAccount(restoredCodexAccountId);
+    const codexRestore =
+      await ManagedIdeService.restoreImportedCodexAccount(restoredCodexAccountId);
     result.codexRestore = {
       ...codexRestore,
       warnings: [...codexRestore.warnings, ...codexRestoreSelection.warnings],

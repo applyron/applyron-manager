@@ -638,7 +638,10 @@ export class CodexAccountStore {
     );
   }
 
-  static async setHydrationState(id: string, hydrationState: CodexAccountHydrationState): Promise<void> {
+  static async setHydrationState(
+    id: string,
+    hydrationState: CodexAccountHydrationState,
+  ): Promise<void> {
     return runWithFallback(
       async () => {
         const { raw, orm } = getDb();
