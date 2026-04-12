@@ -2,6 +2,17 @@
 
 # Changelog
 
+## [1.0.4](https://github.com/applyron/applyron-manager/compare/v1.0.3...v1.0.4) (2026-04-12)
+
+### 🐛 Bug Fixes
+
+* restore codex reload apply and quota sync ([acb8a23](https://github.com/applyron/applyron-manager/commit/acb8a2360c56ebd887e8387f71a4f5a8f240f7a5))
+* restore green GitHub Actions checks ([b2d9cd6](https://github.com/applyron/applyron-manager/commit/b2d9cd624577a7af7f0b23ce854760da0a40c5f3))
+
+### 🔧 Continuous Integration
+
+* upgrade GitHub Actions to Node 24-ready versions ([d8d3a69](https://github.com/applyron/applyron-manager/commit/d8d3a699a4e088064e59adcbfde814da5b5cdf32))
+
 ## [1.0.3](https://github.com/applyron/applyron-manager/compare/v1.0.2...v1.0.3) (2026-04-11)
 
 ### 🐛 Bug Fixes
