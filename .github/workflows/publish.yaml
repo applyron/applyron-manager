@@ -38,10 +38,10 @@ jobs:
 
     steps:
       - name: Checkout git repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node and NPM
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload packaged smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: packaged-smoke-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
@@ -93,10 +93,10 @@ jobs:
 
     steps:
       - name: Checkout git repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node and NPM
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -150,10 +150,10 @@ jobs:
 
     steps:
       - name: Checkout git repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node and NPM
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -189,10 +189,10 @@ jobs:
 
     steps:
       - name: Checkout git repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node and NPM
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -325,7 +325,7 @@ jobs:
 
     steps:
       - name: Checkout git repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure SSH for update server
         shell: bash
