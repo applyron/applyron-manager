@@ -30,15 +30,18 @@ import {
   useRefreshCodexAccount,
   useSyncCodexRuntimeState,
 } from '@/hooks/useManagedIde';
+import { openExternalUrl } from '@/actions/system';
 import { useAppConfig } from '@/hooks/useAppConfig';
 import { getCodexRemainingRequestPercent, getCodexWindowKind } from '@/managedIde/codexMetadata';
 import { getCodexHealthState } from '@/managedIde/codexHealth';
-import { sortCodexAccounts } from '@/managedIde/codexAccounts';
+import {
+  reconcileCodexAccountsWithLiveIdentity,
+  sortCodexAccounts,
+} from '@/managedIde/codexAccounts';
 import { getCodexAccountDisplayIdentity, getCodexWorkspaceLabel } from '@/managedIde/codexIdentity';
 import type {
   CodexAccountRecord,
   CodexRuntimeId,
-  ManagedIdeCodexRuntimeStatus,
 } from '@/managedIde/types';
 import { getLocalizedErrorMessage } from '@/utils/errorMessages';
 import { GridLayout, normalizeGridLayout } from '@/types/config';
@@ -112,16 +115,6 @@ function getRuntimeLabel(runtimeId: CodexRuntimeId, t: (key: string) => string):
   return runtimeId === 'wsl-remote'
     ? t('managedIde.runtimes.wslRemote')
     : t('managedIde.runtimes.windowsLocal');
-}
-
-function getRuntimeStateSummary(
-  runtime: ManagedIdeCodexRuntimeStatus,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  return t('cloud.codex.runtime.stateSummary', {
-    name: getRuntimeLabel(runtime.id, t),
-    state: t(`managedIde.session.${runtime.session.state}`),
-  });
 }
 
 function AccountCard({
@@ -423,8 +416,12 @@ export function CodexAccountPanel() {
     ? getLocalizedErrorMessage(statusQuery.error, t)
     : null;
   const accounts = useMemo(
-    () => sortCodexAccounts(accountsQuery.data ?? EMPTY_ACCOUNTS),
-    [accountsQuery.data],
+    () =>
+      reconcileCodexAccountsWithLiveIdentity(
+        sortCodexAccounts(accountsQuery.data ?? EMPTY_ACCOUNTS),
+        status?.liveAccountIdentityKey,
+      ),
+    [accountsQuery.data, status?.liveAccountIdentityKey],
   );
   const gridLayout = normalizeGridLayout(config?.grid_layout ?? '2-col');
   const runtimeStatuses = status?.runtimes ?? [];
@@ -438,13 +435,10 @@ export function CodexAccountPanel() {
     ? getRuntimeLabel(pendingRuntimeApply.runtimeId, t)
     : null;
   const activeRuntimeLabel = activeRuntime ? getRuntimeLabel(activeRuntime.id, t) : null;
-  const requiresRuntimeSelection = Boolean(status?.requiresRuntimeSelection);
   const hasRuntimeMismatch = Boolean(status?.hasRuntimeMismatch);
-  const runtimeActionBlocked = requiresRuntimeSelection || !installation?.available;
-  const canAddAccount = Boolean(
-    installation?.available && installation?.codexCliPath && !requiresRuntimeSelection,
-  );
-  const canImportCurrent = Boolean(installation?.available && !requiresRuntimeSelection);
+  const runtimeActionBlocked = !installation?.available;
+  const canAddAccount = Boolean(installation?.available && installation?.codexCliPath);
+  const canImportCurrent = Boolean(installation?.available);
   const canSyncRuntime = availableRuntimes.length >= 2;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -480,15 +474,6 @@ export function CodexAccountPanel() {
   }, [pendingRuntimeApply]);
 
   const handleRefreshAll = useCallback(() => {
-    if (requiresRuntimeSelection) {
-      toast({
-        title: t('managedIde.toast.refreshFailedTitle'),
-        description: getLocalizedErrorMessage(new Error('CODEX_RUNTIME_SELECTION_REQUIRED'), t),
-        variant: 'destructive',
-      });
-      return;
-    }
-
     refreshAllMutation.mutate(undefined, {
       onError: (error) => {
         toast({
@@ -498,7 +483,7 @@ export function CodexAccountPanel() {
         });
       },
     });
-  }, [refreshAllMutation, requiresRuntimeSelection, t, toast]);
+  }, [refreshAllMutation, t, toast]);
 
   useEffect(() => {
     const handleShortcutRefresh = () => {
@@ -536,15 +521,6 @@ export function CodexAccountPanel() {
   };
 
   const handleAddAccount = () => {
-    if (requiresRuntimeSelection) {
-      toast({
-        title: t('cloud.codex.toast.addFailedTitle'),
-        description: getLocalizedErrorMessage(new Error('CODEX_RUNTIME_SELECTION_REQUIRED'), t),
-        variant: 'destructive',
-      });
-      return;
-    }
-
     addMutation.mutate(undefined, {
       onSuccess: (accounts) => {
         const description =
@@ -572,15 +548,6 @@ export function CodexAccountPanel() {
   };
 
   const handleImportCurrent = () => {
-    if (requiresRuntimeSelection) {
-      toast({
-        title: t('cloud.codex.toast.importFailedTitle'),
-        description: getLocalizedErrorMessage(new Error('CODEX_RUNTIME_SELECTION_REQUIRED'), t),
-        variant: 'destructive',
-      });
-      return;
-    }
-
     importMutation.mutate(undefined, {
       onSuccess: (account) => {
         toast({
@@ -599,15 +566,6 @@ export function CodexAccountPanel() {
   };
 
   const handleRefreshAccount = (accountId: string) => {
-    if (requiresRuntimeSelection) {
-      toast({
-        title: t('managedIde.toast.refreshFailedTitle'),
-        description: getLocalizedErrorMessage(new Error('CODEX_RUNTIME_SELECTION_REQUIRED'), t),
-        variant: 'destructive',
-      });
-      return;
-    }
-
     refreshAccountMutation.mutate(accountId, {
       onError: (error) => {
         toast({
@@ -620,15 +578,6 @@ export function CodexAccountPanel() {
   };
 
   const handleActivateAccount = (accountId: string) => {
-    if (requiresRuntimeSelection) {
-      toast({
-        title: t('cloud.codex.toast.activateFailedTitle'),
-        description: getLocalizedErrorMessage(new Error('CODEX_RUNTIME_SELECTION_REQUIRED'), t),
-        variant: 'destructive',
-      });
-      return;
-    }
-
     activateMutation.mutate(accountId, {
       onSuccess: (activation) => {
         const accountIdentity =
@@ -667,19 +616,18 @@ export function CodexAccountPanel() {
     });
   };
 
-  const handleSelectRuntime = async (runtimeId: CodexRuntimeId) => {
-    if (!config) {
-      return;
-    }
-
+  const handleReloadVsCode = async () => {
     try {
-      await saveConfig({
-        ...config,
-        codex_runtime_override: runtimeId,
+      await openExternalUrl({
+        url: 'vscode://command/workbench.action.reloadWindow',
+        intent: 'vscode_command',
       });
-      await statusQuery.refetch();
-    } catch {
-      // useAppConfig already surfaces a localized error toast
+    } catch (error) {
+      toast({
+        title: t('cloud.codex.pendingApply.title'),
+        description: getLocalizedErrorMessage(error, t),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -890,19 +838,6 @@ export function CodexAccountPanel() {
               </div>
             ) : null}
 
-            {requiresRuntimeSelection ? (
-              <div
-                className="flex h-9 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap"
-                style={{
-                  background: 'var(--hud-danger-soft-bg)',
-                  border: '1px solid var(--hud-danger-soft-border)',
-                  color: getHudTone('danger').text,
-                }}
-              >
-                {t('cloud.codex.badges.runtimeSelectionNeeded')}
-              </div>
-            ) : null}
-
             <div
               className="flex h-11 shrink-0 items-center rounded-xl border p-1"
               style={{ background: 'var(--hud-input-bg)', borderColor: 'var(--hud-border-soft)' }}
@@ -933,9 +868,7 @@ export function CodexAccountPanel() {
                 onClick={handleRefreshAll}
                 title={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
                 aria-label={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
-                disabled={
-                  refreshAllMutation.isPending || accounts.length === 0 || requiresRuntimeSelection
-                }
+                disabled={refreshAllMutation.isPending || accounts.length === 0}
                 className="text-foreground hover:bg-accent/60 hover:text-primary h-9 w-9 rounded-lg"
               >
                 <RefreshCcw
@@ -952,7 +885,7 @@ export function CodexAccountPanel() {
                   <Button
                     variant="ghost"
                     onClick={handleSyncRuntimeState}
-                    disabled={syncRuntimeMutation.isPending || requiresRuntimeSelection}
+                    disabled={syncRuntimeMutation.isPending}
                     className="text-foreground hover:bg-accent/60 hover:text-primary h-9 rounded-lg px-3.5 whitespace-nowrap"
                   >
                     {syncRuntimeMutation.isPending ? (
@@ -1021,41 +954,6 @@ export function CodexAccountPanel() {
         </div>
       </div>
 
-      {requiresRuntimeSelection ? (
-        <div
-          className="rounded-lg border border-dashed p-4"
-          style={ALERT_PANEL_STYLE}
-          data-testid="codex-runtime-selection"
-        >
-          <div className="font-medium">{t('cloud.codex.runtime.selectionTitle')}</div>
-          <div className="text-muted-foreground mt-1 text-sm">
-            {t('cloud.codex.runtime.selectionDescription')}
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            {availableRuntimes.map((runtime) => (
-              <Button
-                key={runtime.id}
-                variant="outline"
-                onClick={() => void handleSelectRuntime(runtime.id)}
-                disabled={isSaving}
-                className="text-foreground hover:bg-accent/60 h-auto min-w-[220px] justify-start border-[var(--hud-border-soft)] bg-transparent px-4 py-3 text-left"
-              >
-                <div>
-                  <div className="font-semibold">
-                    {runtime.id === 'windows-local'
-                      ? t('cloud.codex.runtime.useWindowsLocal')
-                      : t('cloud.codex.runtime.useWslRemote')}
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    {getRuntimeStateSummary(runtime, t)}
-                  </div>
-                </div>
-              </Button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       {accountsQuery.isError ? (
         <div
           className="text-foreground rounded-lg border border-dashed p-4 text-sm"
@@ -1117,6 +1015,16 @@ export function CodexAccountPanel() {
                   : t('managedIde.empty.unknown')),
               runtime: pendingRuntimeLabel ?? t('managedIde.empty.unknown'),
             })}
+          </div>
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              onClick={() => void handleReloadVsCode()}
+              className="text-foreground hover:bg-accent/60 border-[var(--hud-border-soft)] bg-transparent"
+            >
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              {t('cloud.codex.pendingApply.reloadAction')}
+            </Button>
           </div>
         </div>
       ) : null}

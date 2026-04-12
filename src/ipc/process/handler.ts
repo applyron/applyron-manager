@@ -54,6 +54,58 @@ function isManagerProcess(name: string, cmd: string, targetId: ManagedIdeTargetI
   });
 }
 
+function isVsCodeMainProcess(name: string, cmd: string): boolean {
+  const normalizedName = name.trim().toLowerCase();
+  const normalizedCmd = cmd.trim().toLowerCase();
+
+  if (process.platform === 'win32') {
+    if (normalizedName !== 'code.exe' && normalizedName !== 'code') {
+      return false;
+    }
+
+    if (
+      normalizedCmd.includes('update.exe') ||
+      normalizedCmd.includes('updater') ||
+      normalizedCmd.includes('setup')
+    ) {
+      return false;
+    }
+
+    if (!normalizedCmd) {
+      return true;
+    }
+
+    return /(?:^|["\s\\\/])code(?:\.exe)?(?:"|\s|$)/.test(normalizedCmd);
+  }
+
+  if (process.platform === 'darwin') {
+    return normalizedCmd.includes('visual studio code.app') || normalizedName === 'code';
+  }
+
+  return normalizedName === 'code' || normalizedCmd.includes('/code');
+}
+
+function hasVisibleVsCodeWindowOnWindows(): boolean | null {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  try {
+    const output = execSync(
+      'powershell.exe -NoProfile -Command "$windows = Get-Process -Name Code -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }; if ($windows) { $windows | Select-Object -ExpandProperty Id }"',
+      {
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    );
+    return output.trim().length > 0;
+  } catch (error) {
+    logger.warn('Failed to detect visible VS Code windows on Windows; falling back to process scan', error);
+    return null;
+  }
+}
+
 function matchesMainProcess(proc: ProcessInfo, targetId: ManagedIdeTargetId): boolean {
   const target = getManagedIdeTarget(targetId);
   const name = proc.name?.toLowerCase() || '';
@@ -75,6 +127,10 @@ function matchesMainProcess(proc: ProcessInfo, targetId: ManagedIdeTargetId): bo
     return (
       (name.includes('antigravity') || cmd.includes('/antigravity')) && !name.includes('tools')
     );
+  }
+
+  if (targetId === 'vscode-codex') {
+    return isVsCodeMainProcess(name, cmd);
   }
 
   return target.processSearchNames.some((searchName) => {
@@ -195,6 +251,16 @@ export async function isManagedIdeProcessRunning(
   const searchNames = target.processSearchNames;
 
   try {
+    if (targetId === 'vscode-codex' && process.platform === 'win32') {
+      const hasVisibleWindow = hasVisibleVsCodeWindowOnWindows();
+      if (typeof hasVisibleWindow === 'boolean') {
+        if (hasVisibleWindow) {
+          logger.debug('Found visible VS Code main window');
+        }
+        return hasVisibleWindow;
+      }
+    }
+
     const currentPid = process.pid;
     const processMap = new Map<number, ProcessInfo>();
     let sawNoMatch = false;

@@ -8,11 +8,17 @@ import { isWsl } from '../../utils/paths';
 import { getWslExecutableCommand, toAccessibleWslPath } from '../../utils/wslRuntime';
 import { CodexAppServerClient } from '../codexAppServerClient';
 import { normalizeCodexAgentMode, normalizeCodexServiceTier } from '../codexMetadata';
-import { getCodexAuthFilePath, readCodexAuthFile, writeCodexAuthFile } from '../codexAuth';
+import {
+  getCodexAuthFilePath,
+  getCodexPlanTypeHint,
+  readCodexAuthFile,
+  writeCodexAuthFile,
+} from '../codexAuth';
 import { ManagedIdeCurrentStatusSchema } from '../schemas';
 import { CACHE_KEY } from './constants';
 import { readCodexGlobalStateSnapshot } from './globalStateDb';
 import { getFileUpdatedAt, isWindowsWslRemoteRuntime, runWslShellCommand } from './runtimeEnvironment';
+import { getLiveCodexAccountIdentityKey } from './accountIdentity';
 import type { CodexGlobalStateSnapshot, CodexRuntimeEnvironment } from './types';
 import type {
   CodexAuthFile,
@@ -153,6 +159,7 @@ export function createUnavailableRuntimeStatus(
   return createRuntimeStatusSnapshot(runtime, {
     installation: runtime.installation,
     session: buildUnavailableSession(reason === 'not_signed_in' ? 'requires_login' : 'unavailable'),
+    liveAccountIdentityKey: null,
     quota: null,
     quotaByLimitId: null,
     authFilePath: runtime.authFilePath,
@@ -218,6 +225,7 @@ export function createCurrentStatusFromRuntimes(input: {
     targetId: 'vscode-codex',
     installation: getMergedInstallationStatus(input.runtimes, input.activeRuntimeId),
     session: topLevelRuntime?.session ?? buildUnavailableSession('unavailable'),
+    liveAccountIdentityKey: topLevelRuntime?.liveAccountIdentityKey ?? null,
     quota: topLevelRuntime?.quota ?? null,
     quotaByLimitId: topLevelRuntime?.quotaByLimitId ?? null,
     isProcessRunning: input.isProcessRunning,
@@ -404,6 +412,7 @@ export async function buildRuntimeStatusFromAuthFile(input: {
     return createRuntimeStatusSnapshot(runtime, {
       installation: runtime.installation,
       session: buildUnavailableSession('requires_login'),
+      liveAccountIdentityKey: null,
       quota: null,
       quotaByLimitId: null,
       authFilePath: runtime.authFilePath,
@@ -454,6 +463,7 @@ export async function buildRuntimeStatusFromAuthFile(input: {
           rateLimits?.planType ??
           snapshot.planTypeHint ??
           (globalStateHints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
+        const email = input.getPreferredCodexEmail(authFile, account?.email);
 
         return createRuntimeStatusSnapshot(runtime, {
           installation: runtime.installation,
@@ -468,7 +478,7 @@ export async function buildRuntimeStatusFromAuthFile(input: {
                 : account?.type === 'apiKey'
                   ? 'apikey'
                   : normalizeManagedIdeAuthMode(authFile.auth_mode)),
-            email: input.getPreferredCodexEmail(authFile, account?.email),
+            email,
             planType,
             requiresOpenaiAuth:
               snapshot.account?.requiresOpenaiAuth ??
@@ -480,6 +490,11 @@ export async function buildRuntimeStatusFromAuthFile(input: {
             agentMode: normalizeCodexAgentMode(globalStateHints.agentMode),
             lastUpdatedAt,
           },
+          liveAccountIdentityKey: getLiveCodexAccountIdentityKey({
+            authFile,
+            planType,
+            fallbackEmail: email,
+          }),
           quota: rateLimits,
           quotaByLimitId:
             rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
@@ -496,6 +511,22 @@ export async function buildRuntimeStatusFromAuthFile(input: {
     );
   } catch (error) {
     logger.error(`Failed to collect ${runtime.displayName} Codex status from app-server`, error);
-    return createUnavailableRuntimeStatus(runtime, 'app_server_unavailable');
+    return createRuntimeStatusSnapshot(runtime, {
+      installation: runtime.installation,
+      session: buildUnavailableSession('unavailable'),
+      liveAccountIdentityKey: getLiveCodexAccountIdentityKey({
+        authFile,
+        planType: getCodexPlanTypeHint(authFile),
+        fallbackEmail: input.getPreferredCodexEmail(authFile, null),
+      }),
+      quota: null,
+      quotaByLimitId: null,
+      authFilePath: runtime.authFilePath,
+      stateDbPath: runtime.stateDbPath,
+      storagePath: runtime.storagePath,
+      authLastUpdatedAt: runtime.authLastUpdatedAt,
+      extensionStateUpdatedAt: globalStateHints.updatedAt ?? runtime.extensionStateUpdatedAt,
+      lastUpdatedAt,
+    });
   }
 }

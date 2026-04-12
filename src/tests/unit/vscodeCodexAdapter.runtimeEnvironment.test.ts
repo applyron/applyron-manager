@@ -1,15 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CodexRuntimeEnvironment } from '../../managedIde/vscodeCodexAdapter/types';
 
-const { mockGetCachedConfigOrLoad, mockGetActiveVsCodeWindowRuntimeId } = vi.hoisted(() => ({
-  mockGetCachedConfigOrLoad: vi.fn(),
+const { mockGetActiveVsCodeWindowRuntimeId } = vi.hoisted(() => ({
   mockGetActiveVsCodeWindowRuntimeId: vi.fn(),
-}));
-
-vi.mock('../../ipc/config/manager', () => ({
-  ConfigManager: {
-    getCachedConfigOrLoad: mockGetCachedConfigOrLoad,
-  },
 }));
 
 vi.mock('../../utils/wslRuntime', () => ({
@@ -77,11 +70,10 @@ function createRuntime(id: CodexRuntimeEnvironment['id']): CodexRuntimeEnvironme
 describe('vscodeCodexAdapter/runtimeEnvironment', () => {
   beforeEach(() => {
     vi.resetModules();
-    mockGetCachedConfigOrLoad.mockReturnValue({});
     mockGetActiveVsCodeWindowRuntimeId.mockReturnValue(null);
   });
 
-  it('requires manual runtime selection when multiple runtimes are available and nothing is detected', async () => {
+  it('falls back to Windows Local when multiple runtimes are available and nothing is detected', async () => {
     const { resolveCodexRuntimeSelection } = await import(
       '../../managedIde/vscodeCodexAdapter/runtimeEnvironment'
     );
@@ -91,15 +83,12 @@ describe('vscodeCodexAdapter/runtimeEnvironment', () => {
       createRuntime('wsl-remote'),
     ]);
 
-    expect(selection.activeRuntimeId).toBeNull();
-    expect(selection.requiresRuntimeSelection).toBe(true);
+    expect(selection.activeRuntimeId).toBe('windows-local');
+    expect(selection.requiresRuntimeSelection).toBe(false);
   });
 
-  it('honors the cached runtime override when there is no active VS Code runtime', async () => {
-    mockGetCachedConfigOrLoad.mockReturnValue({
-      codex_runtime_override: 'wsl-remote',
-    });
-
+  it('still prefers the detected WSL runtime when the active VS Code window is remote', async () => {
+    mockGetActiveVsCodeWindowRuntimeId.mockReturnValue('wsl-remote');
     const { resolveCodexRuntimeSelection } = await import(
       '../../managedIde/vscodeCodexAdapter/runtimeEnvironment'
     );

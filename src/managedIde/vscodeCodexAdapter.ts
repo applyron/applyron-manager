@@ -29,6 +29,7 @@ import {
 import {
   activateAccount as activateStoredAccount,
   ensureDeferredRuntimeApplyWatcher,
+  finalizeDeferredRuntimeApply,
   flushDeferredRuntimeApplyIfPossible,
   getActiveRuntimeOrThrow,
   getDeferredRuntimeApply,
@@ -91,6 +92,26 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     return createRuntimeSelection();
   }
 
+  private hasDeferredRuntimeRecycleCompleted(input: {
+    deferredRuntimeApply: NonNullable<DeferredRuntimeApplyStateBag['deferredRuntimeApply']>;
+    runtimeResults: Array<{
+      runtime: CodexRuntimeEnvironment;
+      status: ManagedIdeCurrentStatus['runtimes'][number];
+    }>;
+    isProcessRunning: boolean;
+  }): boolean {
+    if (!input.isProcessRunning) {
+      return true;
+    }
+
+    return input.runtimeResults.some(
+      (result) =>
+        result.runtime.installation.available &&
+        typeof result.status.extensionStateUpdatedAt === 'number' &&
+        result.status.extensionStateUpdatedAt > input.deferredRuntimeApply.requestedAt,
+    );
+  }
+
   private async buildRuntimeStatusFromAuthFile(
     runtime: CodexRuntimeEnvironment,
     authFile: CodexAuthFile | null,
@@ -119,20 +140,26 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     const cached = readCachedStatus();
     let deferredRuntimeApply = this.getDeferredRuntimeApply();
     let isProcessRunning = await resolveProcessRunningState(options, cached?.isProcessRunning);
-    if (deferredRuntimeApply && typeof cached?.isProcessRunning !== 'boolean' && !options?.refresh) {
+    if (deferredRuntimeApply && options?.refresh !== true) {
       isProcessRunning = await resolveProcessRunningState({ refresh: true });
     }
-    if (!isProcessRunning) {
-      await this.flushDeferredRuntimeApplyIfPossible({ assumeIdeStopped: true });
+    if (deferredRuntimeApply) {
+      await this.flushDeferredRuntimeApplyIfPossible(
+        isProcessRunning ? undefined : { assumeIdeStopped: true },
+      );
       deferredRuntimeApply = this.getDeferredRuntimeApply();
-    } else if (deferredRuntimeApply) {
-      this.ensureDeferredRuntimeApplyWatcher();
+      if (deferredRuntimeApply) {
+        this.ensureDeferredRuntimeApplyWatcher();
+      }
+    } else if (!isProcessRunning) {
+      await this.flushDeferredRuntimeApplyIfPossible({ assumeIdeStopped: true });
     }
 
     const shouldProbeLive =
       options?.refresh === true ||
       !cached ||
       cached.session.state !== 'ready' ||
+      (cached.session.state === 'ready' && cached.liveAccountIdentityKey === null) ||
       cached.activeRuntimeId !== selection.activeRuntimeId ||
       cached.requiresRuntimeSelection !== selection.requiresRuntimeSelection ||
       cached.runtimes.length !== selection.runtimes.length;
@@ -157,7 +184,7 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
       }),
     );
 
-    const status = createCurrentStatusFromRuntimes({
+    let status = createCurrentStatusFromRuntimes({
       runtimes: runtimeResults.map((result) => result.status),
       activeRuntimeId: selection.activeRuntimeId,
       requiresRuntimeSelection: selection.requiresRuntimeSelection,
@@ -166,6 +193,47 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
       isProcessRunning,
       fromCache: false,
     });
+
+    if (
+      deferredRuntimeApply &&
+      this.hasDeferredRuntimeRecycleCompleted({
+        deferredRuntimeApply,
+        runtimeResults,
+        isProcessRunning,
+      })
+    ) {
+      await finalizeDeferredRuntimeApply({
+        state: this.runtimeApplyState,
+        status,
+      });
+      deferredRuntimeApply = this.getDeferredRuntimeApply();
+      status = {
+        ...status,
+        pendingRuntimeApply: deferredRuntimeApply,
+      };
+    }
+
+    if (deferredRuntimeApply) {
+      if (cached) {
+        return {
+          ...cached,
+          installation: status.installation,
+          isProcessRunning,
+          activeRuntimeId: status.activeRuntimeId,
+          requiresRuntimeSelection: status.requiresRuntimeSelection,
+          hasRuntimeMismatch: status.hasRuntimeMismatch,
+          pendingRuntimeApply: deferredRuntimeApply,
+          runtimes: status.runtimes,
+          fromCache: true,
+        };
+      }
+
+      return {
+        ...status,
+        liveAccountIdentityKey: null,
+        pendingRuntimeApply: deferredRuntimeApply,
+      };
+    }
 
     if (status.session.state === 'ready') {
       writeCachedStatus(status);

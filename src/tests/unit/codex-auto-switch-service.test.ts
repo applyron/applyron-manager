@@ -149,6 +149,7 @@ describe('CodexAutoSwitchService', () => {
       pendingRuntimeApply: {
         runtimeId: 'wsl-remote',
         recordId: 'standby-better',
+        requestedAt: 123,
       },
     });
 

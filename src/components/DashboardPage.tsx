@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAppConfig } from '@/hooks/useAppConfig';
 import { APP_UPDATE_STATUS_QUERY_KEY, useAppUpdateStatus } from '@/hooks/useAppUpdateStatus';
 import { useCloudAccounts } from '@/hooks/useCloudAccounts';
-import { useCodexAccounts } from '@/hooks/useManagedIde';
+import { useCodexAccounts, useManagedIdeStatus } from '@/hooks/useManagedIde';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Sparkles, SquareTerminal, WifiOff } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
@@ -31,6 +31,7 @@ import {
   getCanonicalVisibleQuotaModels,
   summarizeCanonicalQuotaModels,
 } from '@/utils/cloud-quota-models';
+import { resolveLiveCodexAccount } from '@/managedIde/codexAccounts';
 import { Button } from '@/components/ui/button';
 import { Link } from '@tanstack/react-router';
 
@@ -76,6 +77,11 @@ export function DashboardPage() {
 
   const cloudAccountsQuery = useCloudAccounts();
   const codexAccountsQuery = useCodexAccounts();
+  const codexStatusQuery = useManagedIdeStatus('vscode-codex', {
+    enabled: true,
+    refresh: false,
+    refetchInterval: false,
+  });
 
   const manualCheckMutation = useMutation({
     mutationFn: checkForUpdatesManual,
@@ -158,9 +164,12 @@ export function DashboardPage() {
   }, [cloudAccountsQuery.data, config?.model_visibility, t]);
 
   const activeCodexAccount = useMemo(() => {
-    const selectedAccount = (codexAccountsQuery.data ?? []).find((account) => account.isActive);
+    const selectedAccount = resolveLiveCodexAccount(
+      codexAccountsQuery.data ?? [],
+      codexStatusQuery.data?.liveAccountIdentityKey,
+    );
     return selectedAccount ? buildCodexAccountSummary(selectedAccount, t) : null;
-  }, [codexAccountsQuery.data, t]);
+  }, [codexAccountsQuery.data, codexStatusQuery.data?.liveAccountIdentityKey, t]);
 
   const announcementTickerKey = useMemo(
     () => announcementItems.map((item) => `${item.id}:${item.publishedAt}`).join('|'),

@@ -110,6 +110,11 @@ export interface QuotaData {
   is_forbidden?: boolean;
 }
 
+export interface FetchQuotaOptions {
+  projectId?: string | null;
+  subscriptionTier?: string;
+}
+
 export interface ModelQuotaInfo {
   percentage: number;
   resetTime: string;
@@ -226,12 +231,24 @@ function isTrackedModel(modelName: string): boolean {
   return /^(gemini|claude|gpt|image|imagen)/i.test(modelName);
 }
 
+function normalizeRemainingFraction(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(value, 1));
+}
+
 function toModelQuotaInfo(modelName: string, info: ModelInfoRaw): ModelQuotaInfo | null {
   if (!isTrackedModel(modelName) || !info.quotaInfo) {
     return null;
   }
 
-  const fraction = info.quotaInfo.remainingFraction ?? 0;
+  const fraction = normalizeRemainingFraction(info.quotaInfo.remainingFraction);
+  if (fraction === null) {
+    return null;
+  }
+
   return {
     percentage: Math.floor(fraction * 100),
     resetTime: info.quotaInfo.resetTime || '',
@@ -496,8 +513,18 @@ export class GoogleAPIService {
   /**
    * Core logic: Fetches detailed model quota information.
    */
-  static async fetchQuota(accessToken: string): Promise<QuotaData> {
-    const { projectId, subscriptionTier } = await this.fetchProjectContext(accessToken);
+  static async fetchQuota(accessToken: string, options?: FetchQuotaOptions): Promise<QuotaData> {
+    let projectId =
+      typeof options?.projectId === 'string' && options.projectId.trim() !== ''
+        ? options.projectId.trim()
+        : undefined;
+    let subscriptionTier = options?.subscriptionTier;
+
+    if (!projectId) {
+      const context = await this.fetchProjectContext(accessToken);
+      projectId = context.projectId;
+      subscriptionTier = context.subscriptionTier ?? subscriptionTier;
+    }
 
     const payload: Record<string, unknown> = {};
     if (projectId) {

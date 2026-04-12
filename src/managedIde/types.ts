@@ -4,6 +4,7 @@ export type CodexRuntimeId = 'windows-local' | 'wsl-remote';
 export interface CodexPendingRuntimeApply {
   runtimeId: CodexRuntimeId;
   recordId: string;
+  requestedAt: number;
 }
 
 export interface ManagedIdeTargetCapabilities {
@@ -94,6 +95,7 @@ export interface ManagedIdeCodexRuntimeStatus {
   displayName: string;
   installation: ManagedIdeInstallationStatus;
   session: ManagedIdeSessionSnapshot;
+  liveAccountIdentityKey: string | null;
   quota: ManagedIdeQuotaSnapshot | null;
   quotaByLimitId: Record<string, ManagedIdeQuotaSnapshot> | null;
   authFilePath: string | null;
@@ -108,6 +110,7 @@ export interface ManagedIdeCurrentStatus {
   targetId: ManagedIdeTargetId;
   installation: ManagedIdeInstallationStatus;
   session: ManagedIdeSessionSnapshot;
+  liveAccountIdentityKey: string | null;
   quota: ManagedIdeQuotaSnapshot | null;
   quotaByLimitId: Record<string, ManagedIdeQuotaSnapshot> | null;
   isProcessRunning: boolean;

@@ -6,6 +6,8 @@ const {
   mockCollectSnapshot,
   mockWriteCodexAuthFile,
   mockGetCodexAuthFilePath,
+  mockGetCodexPlanTypeHint,
+  mockGetCodexWorkspaceFromAuthFile,
   mockLoggerError,
 } = vi.hoisted(() => ({
   mockMkdtemp: vi.fn(),
@@ -13,6 +15,8 @@ const {
   mockCollectSnapshot: vi.fn(),
   mockWriteCodexAuthFile: vi.fn(),
   mockGetCodexAuthFilePath: vi.fn(),
+  mockGetCodexPlanTypeHint: vi.fn(),
+  mockGetCodexWorkspaceFromAuthFile: vi.fn(),
   mockLoggerError: vi.fn(),
 }));
 
@@ -31,8 +35,14 @@ vi.mock('../../managedIde/codexAppServerClient', () => ({
 
 vi.mock('../../managedIde/codexAuth', () => ({
   getCodexAuthFilePath: mockGetCodexAuthFilePath,
+  getCodexPlanTypeHint: mockGetCodexPlanTypeHint,
+  getCodexWorkspaceFromAuthFile: mockGetCodexWorkspaceFromAuthFile,
   readCodexAuthFile: vi.fn(),
   writeCodexAuthFile: mockWriteCodexAuthFile,
+}));
+
+vi.mock('../../managedIde/codexChromeWorkspaceHints', () => ({
+  getCodexChromeWorkspaceLabel: vi.fn(() => null),
 }));
 
 vi.mock('../../ipc/database/cloudHandler', () => ({
@@ -77,6 +87,8 @@ describe('vscodeCodexAdapter/status', () => {
     mockCollectSnapshot.mockReset();
     mockWriteCodexAuthFile.mockReset();
     mockGetCodexAuthFilePath.mockReturnValue('/tmp/codex-home/auth.json');
+    mockGetCodexPlanTypeHint.mockReturnValue('team');
+    mockGetCodexWorkspaceFromAuthFile.mockReturnValue(null);
     mockLoggerError.mockReset();
   });
 
@@ -107,6 +119,7 @@ describe('vscodeCodexAdapter/status', () => {
 
   it('falls back to an unavailable runtime status when the app-server probe fails', async () => {
     mockCollectSnapshot.mockRejectedValue(new Error('app-server down'));
+    mockGetCodexPlanTypeHint.mockReturnValue('plus');
 
     const { buildRuntimeStatusFromAuthFile } = await import(
       '../../managedIde/vscodeCodexAdapter/status'
@@ -151,6 +164,7 @@ describe('vscodeCodexAdapter/status', () => {
 
     expect(status.session.state).toBe('unavailable');
     expect(status.installation.reason).toBe('ready');
+    expect(status.liveAccountIdentityKey).toBe('acct-1');
     expect(mockLoggerError).toHaveBeenCalled();
   });
 

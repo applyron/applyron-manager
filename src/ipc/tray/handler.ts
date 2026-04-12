@@ -19,6 +19,7 @@ import {
   normalizeCodexServiceTier,
   prettifyCodexValue,
 } from '../../managedIde/codexMetadata';
+import { normalizeProjectId } from '../../utils/projectId';
 
 let tray: Tray | null = null;
 let globalMainWindow: BrowserWindow | null = null;
@@ -161,7 +162,16 @@ function buildAntigravityMenu(
 
           logger.info(`Tray: Refreshing quota for ${current.email}`);
 
-          const quota = await GoogleAPIService.fetchQuota(current.token.access_token);
+          const quota = await GoogleAPIService.fetchQuota(current.token.access_token, {
+            projectId: normalizeProjectId(current.token.project_id),
+            subscriptionTier: current.quota?.subscription_tier,
+          });
+          if (Object.keys(quota.models).length === 0) {
+            logger.warn(
+              `Tray: Quota refresh for ${current.email} returned no valid models; preserving the current snapshot.`,
+            );
+            return;
+          }
           await CloudAccountRepo.updateQuota(current.id, quota);
 
           const updated = await CloudAccountRepo.getAccount(current.id);

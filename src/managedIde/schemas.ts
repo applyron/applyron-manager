@@ -64,6 +64,7 @@ export const ManagedIdeCodexRuntimeStatusSchema = z.object({
   displayName: z.string(),
   installation: ManagedIdeInstallationStatusSchema,
   session: ManagedIdeSessionSnapshotSchema,
+  liveAccountIdentityKey: z.string().nullable().default(null),
   quota: ManagedIdeQuotaSnapshotSchema.nullable(),
   quotaByLimitId: z.record(z.string(), ManagedIdeQuotaSnapshotSchema).nullable(),
   authFilePath: z.string().nullable(),
@@ -77,12 +78,14 @@ export const ManagedIdeCodexRuntimeStatusSchema = z.object({
 export const CodexPendingRuntimeApplySchema = z.object({
   runtimeId: CodexRuntimeIdSchema,
   recordId: z.string(),
+  requestedAt: z.number().default(() => Date.now()),
 });
 
 export const ManagedIdeCurrentStatusSchema = z.object({
   targetId: z.enum(['antigravity', 'vscode-codex']),
   installation: ManagedIdeInstallationStatusSchema,
   session: ManagedIdeSessionSnapshotSchema,
+  liveAccountIdentityKey: z.string().nullable().default(null),
   quota: ManagedIdeQuotaSnapshotSchema.nullable(),
   quotaByLimitId: z.record(z.string(), ManagedIdeQuotaSnapshotSchema).nullable(),
   isProcessRunning: z.boolean(),

@@ -99,3 +99,34 @@ export function compareCodexAccounts(left: CodexAccountRecord, right: CodexAccou
 export function sortCodexAccounts(accounts: CodexAccountRecord[]): CodexAccountRecord[] {
   return [...accounts].sort(compareCodexAccounts);
 }
+
+export function resolveLiveCodexAccount(
+  accounts: CodexAccountRecord[],
+  liveAccountIdentityKey: string | null | undefined,
+): CodexAccountRecord | null {
+  if (liveAccountIdentityKey) {
+    const liveAccount =
+      accounts.find((account) => getCodexRecordIdentityKey(account) === liveAccountIdentityKey) ??
+      null;
+    if (liveAccount) {
+      return liveAccount;
+    }
+  }
+
+  return accounts.find((account) => account.isActive) ?? null;
+}
+
+export function reconcileCodexAccountsWithLiveIdentity(
+  accounts: CodexAccountRecord[],
+  liveAccountIdentityKey: string | null | undefined,
+): CodexAccountRecord[] {
+  const activeAccount = resolveLiveCodexAccount(accounts, liveAccountIdentityKey);
+  if (!activeAccount) {
+    return accounts;
+  }
+
+  return accounts.map((account) => ({
+    ...account,
+    isActive: account.id === activeAccount.id,
+  }));
+}

@@ -71,7 +71,8 @@ export const enCloud = {
       pendingApply: {
         title: 'Codex account change is queued',
         description:
-          '{{account}} is selected for {{runtime}}. Close VS Code to apply this account.',
+          '{{account}} is selected for {{runtime}}. Reload or close VS Code to apply this account.',
+        reloadAction: 'Reload VS Code',
       },
       confirmDelete: 'Remove {{target}} from the Codex pool?',
       windows: {
@@ -107,7 +108,7 @@ export const enCloud = {
         activatedDescription: 'Applyron Manager switched VS Code Codex to the selected account.',
         deferredActivationTitle: 'Codex account queued',
         deferredActivationDescription:
-          '{{account}} will be applied to {{runtime}} after VS Code closes.',
+          '{{account}} will be applied to {{runtime}} after you reload or close VS Code.',
         activateFailedTitle: 'Failed to activate Codex account',
         deletedTitle: 'Codex account removed',
         deletedDescription: 'The selected Codex account was removed from your Applyron pool.',

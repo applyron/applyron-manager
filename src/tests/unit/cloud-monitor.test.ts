@@ -53,12 +53,22 @@ describe('CloudMonitorService', () => {
     ];
 
     vi.mocked(CloudAccountRepo.getAccounts).mockResolvedValue(mockAccounts as never);
-    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({ models: {} } as never);
+    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({
+      models: {
+        'gemini-2.5-flash': {
+          percentage: 81,
+          resetTime: '2026-03-30T18:00:00.000Z',
+        },
+      },
+    } as never);
 
     await monitor.poll({ trigger: 'scheduled' });
 
     expect(CloudAccountRepo.getAccounts).toHaveBeenCalled();
-    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('valid_token');
+    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('valid_token', {
+      projectId: undefined,
+      subscriptionTier: undefined,
+    });
     expect(CloudAccountRepo.updateQuota).toHaveBeenCalledWith('acc1', expect.anything());
     expect(AutoSwitchService.checkAndSwitchIfNeeded).toHaveBeenCalledWith({
       trigger: 'scheduled',
@@ -84,13 +94,23 @@ describe('CloudMonitorService', () => {
       expires_in: 3600,
       token_type: 'Bearer',
     });
-    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({ models: {} } as never);
+    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({
+      models: {
+        'gemini-2.5-flash': {
+          percentage: 64,
+          resetTime: '2026-03-30T18:00:00.000Z',
+        },
+      },
+    } as never);
 
     await monitor.poll({ trigger: 'scheduled' });
 
     expect(GoogleAPIService.refreshAccessToken).toHaveBeenCalledWith('ref_token');
     expect(CloudAccountRepo.updateToken).toHaveBeenCalled();
-    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('new_token');
+    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('new_token', {
+      projectId: undefined,
+      subscriptionTier: undefined,
+    });
   });
 
   it('skips quota persistence when the operational fingerprint is unchanged', async () => {
@@ -133,6 +153,44 @@ describe('CloudMonitorService', () => {
 
     await monitor.poll({ trigger: 'scheduled' });
 
+    expect(CloudAccountRepo.updateQuota).not.toHaveBeenCalled();
+  });
+
+  it('preserves the previous quota snapshot when refresh returns no valid models', async () => {
+    const existingQuota = {
+      models: {
+        'gemini-2.5-flash': {
+          percentage: 81,
+          resetTime: '2026-03-30T18:00:00.000Z',
+        },
+      },
+      subscription_tier: 'pro',
+    };
+    const mockAccounts = [
+      {
+        id: 'acc1',
+        email: 'test@example.com',
+        quota: existingQuota,
+        token: {
+          access_token: 'valid_token',
+          project_id: 'project-1',
+          expiry_timestamp: Math.floor(Date.now() / 1000) + 3600,
+        },
+      },
+    ];
+
+    vi.mocked(CloudAccountRepo.getAccounts).mockResolvedValue(mockAccounts as never);
+    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({
+      models: {},
+      subscription_tier: 'pro',
+    } as never);
+
+    await monitor.poll({ trigger: 'scheduled' });
+
+    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('valid_token', {
+      projectId: 'project-1',
+      subscriptionTier: 'pro',
+    });
     expect(CloudAccountRepo.updateQuota).not.toHaveBeenCalled();
   });
 

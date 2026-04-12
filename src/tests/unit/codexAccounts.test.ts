@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   getCodexWeeklyRemainingPercent,
   normalizeCodexAccounts,
+  reconcileCodexAccountsWithLiveIdentity,
+  resolveLiveCodexAccount,
   sortCodexAccounts,
 } from '../../managedIde/codexAccounts';
 import type { CodexAccountRecord } from '../../managedIde/types';
@@ -185,5 +187,43 @@ describe('codexAccounts', () => {
     expect(normalized.filter((account) => account.accountId === 'acc-duplicate')).toHaveLength(1);
     expect(normalized.find((account) => account.id === 'dup-new')?.isActive).toBe(true);
     expect(normalized.find((account) => account.id === 'other')?.isActive).toBe(false);
+  });
+
+  it('prefers the live runtime identity over the stored active record', () => {
+    const staleActive = createAccount({
+      id: 'stale-active',
+      accountId: 'acc-stale',
+      isActive: true,
+    });
+    const liveAccount = createAccount({
+      id: 'live-account',
+      accountId: 'acc-live',
+      isActive: false,
+    });
+
+    expect(resolveLiveCodexAccount([staleActive, liveAccount], 'acc-live')?.id).toBe('live-account');
+    expect(reconcileCodexAccountsWithLiveIdentity([staleActive, liveAccount], 'acc-live')).toEqual([
+      { ...staleActive, isActive: false },
+      { ...liveAccount, isActive: true },
+    ]);
+  });
+
+  it('falls back to the stored active record when the live identity is unavailable', () => {
+    const staleActive = createAccount({
+      id: 'stale-active',
+      accountId: 'acc-stale',
+      isActive: true,
+    });
+    const standby = createAccount({
+      id: 'standby',
+      accountId: 'acc-standby',
+      isActive: false,
+    });
+
+    expect(resolveLiveCodexAccount([staleActive, standby], null)?.id).toBe('stale-active');
+    expect(reconcileCodexAccountsWithLiveIdentity([staleActive, standby], null)).toEqual([
+      staleActive,
+      standby,
+    ]);
   });
 });

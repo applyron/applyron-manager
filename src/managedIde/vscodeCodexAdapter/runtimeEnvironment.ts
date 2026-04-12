@@ -2,7 +2,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { ConfigManager } from '../../ipc/config/manager';
 import {
   getManagedIdeDbPaths,
   getManagedIdeExecutablePath,
@@ -296,28 +295,43 @@ export function resolveCodexRuntimeSelection(
     };
   }
 
-  if (availableRuntimeIds.length === 1) {
-    return {
-      runtimes,
-      activeRuntimeId: availableRuntimeIds[0] ?? null,
-      requiresRuntimeSelection: false,
-    };
-  }
-
-  const override = ConfigManager.getCachedConfigOrLoad().codex_runtime_override;
-  if (override && availableRuntimeIds.includes(override)) {
-    return {
-      runtimes,
-      activeRuntimeId: override,
-      requiresRuntimeSelection: false,
-    };
-  }
-
   return {
     runtimes,
-    activeRuntimeId: null,
-    requiresRuntimeSelection: true,
+    activeRuntimeId:
+      (availableRuntimeIds.includes('windows-local') ? 'windows-local' : null) ??
+      availableRuntimeIds[0] ??
+      null,
+    requiresRuntimeSelection: false,
   };
+}
+
+export function getPrimaryCodexRuntime(
+  selection: CodexResolvedRuntimeSelection,
+): CodexRuntimeEnvironment | null {
+  const windowsRuntime = getRuntimeById(selection, 'windows-local');
+  if (windowsRuntime?.installation.available) {
+    return windowsRuntime;
+  }
+
+  const activeRuntime = getRuntimeById(selection, selection.activeRuntimeId);
+  if (activeRuntime?.installation.available) {
+    return activeRuntime;
+  }
+
+  return selection.runtimes.find((runtime) => runtime.installation.available) ?? null;
+}
+
+export function getCompanionCodexRuntimes(
+  selection: CodexResolvedRuntimeSelection,
+  primaryRuntime: CodexRuntimeEnvironment | null,
+): CodexRuntimeEnvironment[] {
+  if (!primaryRuntime) {
+    return [];
+  }
+
+  return selection.runtimes.filter(
+    (runtime) => runtime.installation.available && runtime.id !== primaryRuntime.id,
+  );
 }
 
 export function getRuntimeById(

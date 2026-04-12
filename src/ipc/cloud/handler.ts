@@ -24,6 +24,7 @@ import { openExternalWithPolicy } from '../../utils/externalNavigation';
 import { openPathOrThrow } from '../../utils/openPath';
 import { AuthServer } from './authServer';
 import { getErrorCode, getErrorMessage } from '../../utils/errorHandling';
+import { normalizeProjectId } from '../../utils/projectId';
 
 const GOOGLE_AUTH_CODE_TTL_MS = 10 * 60 * 1000;
 const inflightGoogleAccountAdds = new Map<string, Promise<CloudAccount>>();
@@ -65,6 +66,60 @@ function createGoogleAuthCodeReuseError(): Error {
   return new Error(
     'This Google authorization code was already used. Please start a new login flow and try again.',
   );
+}
+
+function hasValidQuotaModels(account: Pick<CloudAccount, 'quota'>): boolean {
+  return Object.keys(account.quota?.models ?? {}).length > 0;
+}
+
+async function resolveAccountQuotaFetchOptions(
+  account: CloudAccount,
+): Promise<Parameters<typeof GoogleAPIService.fetchQuota>[1]> {
+  const projectId = normalizeProjectId(account.token.project_id);
+  if (projectId) {
+    return {
+      projectId,
+      subscriptionTier: account.quota?.subscription_tier,
+    };
+  }
+
+  const context = await GoogleAPIService.fetchProjectContext(account.token.access_token);
+  const resolvedProjectId = normalizeProjectId(context.projectId);
+  if (resolvedProjectId && resolvedProjectId !== account.token.project_id) {
+    account.token.project_id = resolvedProjectId;
+    await CloudAccountRepo.updateToken(account.id, account.token);
+  }
+
+  return {
+    projectId: resolvedProjectId,
+    subscriptionTier: context.subscriptionTier ?? account.quota?.subscription_tier,
+  };
+}
+
+async function fetchLatestQuotaSnapshot(account: CloudAccount) {
+  const quota = await GoogleAPIService.fetchQuota(
+    account.token.access_token,
+    await resolveAccountQuotaFetchOptions(account),
+  );
+  if (hasValidQuotaModels({ quota })) {
+    return quota;
+  }
+
+  logger.warn(
+    `Quota refresh for ${account.email} returned no valid models; preserving the last known snapshot.`,
+  );
+  return null;
+}
+
+async function applyQuotaRefreshSuccess(account: CloudAccount, quota: CloudAccount['quota']) {
+  if (quota) {
+    account.quota = quota;
+    await CloudAccountRepo.updateQuota(account.id, quota);
+  }
+  await CloudAccountRepo.updateLastUsed(account.id);
+  account.last_used = Math.floor(Date.now() / 1000);
+  notifyTrayUpdate(account);
+  return account;
 }
 
 export async function addGoogleAccount(authCode: string): Promise<CloudAccount> {
@@ -132,10 +187,12 @@ export async function addGoogleAccount(authCode: string): Promise<CloudAccount> 
 
       // 5. Initial Quota Check (Async, best effort)
       try {
-        const quota = await GoogleAPIService.fetchQuota(account.token.access_token);
-        account.quota = quota;
-        await CloudAccountRepo.updateQuota(account.id, quota);
-        notifyTrayUpdate(account);
+        const quota = await fetchLatestQuotaSnapshot(account);
+        if (quota) {
+          account.quota = quota;
+          await CloudAccountRepo.updateQuota(account.id, quota);
+          notifyTrayUpdate(account);
+        }
       } catch (e) {
         logger.warn('Failed to fetch initial quota', e);
       }
@@ -234,13 +291,8 @@ export async function refreshAccountQuota(accountId: string): Promise<CloudAccou
   }
 
   try {
-    const quota = await GoogleAPIService.fetchQuota(account.token.access_token);
-    account.quota = quota;
-    await CloudAccountRepo.updateQuota(account.id, quota);
-    await CloudAccountRepo.updateLastUsed(account.id);
-    account.last_used = Math.floor(Date.now() / 1000); // Sync memory object
-    notifyTrayUpdate(account);
-    return account;
+    const quota = await fetchLatestQuotaSnapshot(account);
+    return applyQuotaRefreshSuccess(account, quota ?? account.quota);
   } catch (error: unknown) {
     const message = getErrorMessage(error);
     if (message === 'UNAUTHORIZED') {
@@ -257,12 +309,8 @@ export async function refreshAccountQuota(accountId: string): Promise<CloudAccou
         await CloudAccountRepo.updateToken(account.id, account.token);
 
         // Retry Quota
-        const quota = await GoogleAPIService.fetchQuota(account.token.access_token);
-        account.quota = quota;
-        await CloudAccountRepo.updateQuota(account.id, quota);
-        await CloudAccountRepo.updateLastUsed(account.id);
-        account.last_used = Math.floor(Date.now() / 1000); // Sync memory object
-        return account;
+        const quota = await fetchLatestQuotaSnapshot(account);
+        return applyQuotaRefreshSuccess(account, quota ?? account.quota);
       } catch (refreshError) {
         logger.error(
           `Failed to force refresh token or retry quota for ${account.email}`,

@@ -13,6 +13,7 @@ const mockUseRefreshCodexAccount = vi.fn();
 const mockUseActivateCodexAccount = vi.fn();
 const mockUseDeleteCodexAccount = vi.fn();
 const mockUseSyncCodexRuntimeState = vi.fn();
+const mockOpenExternalUrl = vi.fn();
 const mockToast = vi.fn();
 const mockSaveConfig = vi.fn();
 const mockConfig = {
@@ -31,6 +32,10 @@ vi.mock('@/hooks/useManagedIde', () => ({
   useActivateCodexAccount: () => mockUseActivateCodexAccount(),
   useDeleteCodexAccount: () => mockUseDeleteCodexAccount(),
   useSyncCodexRuntimeState: () => mockUseSyncCodexRuntimeState(),
+}));
+
+vi.mock('@/actions/system', () => ({
+  openExternalUrl: (input: { url: string; intent: string }) => mockOpenExternalUrl(input),
 }));
 
 vi.mock('@/hooks/useAppConfig', () => ({
@@ -98,7 +103,8 @@ vi.mock('react-i18next', () => ({
         'cloud.codex.runtime.stateSummary': '{{name}} · {{state}}',
         'cloud.codex.pendingApply.title': 'Codex account change is queued',
         'cloud.codex.pendingApply.description':
-          '{{account}} is selected for {{runtime}}. Close VS Code to apply this account.',
+          '{{account}} is selected for {{runtime}}. Reload or close VS Code to apply this account.',
+        'cloud.codex.pendingApply.reloadAction': 'Reload VS Code',
         'cloud.codex.labels.plan': 'Plan',
         'cloud.codex.labels.status': 'Status',
         'cloud.codex.labels.primaryQuota': 'Primary window',
@@ -117,7 +123,7 @@ vi.mock('react-i18next', () => ({
           'Applyron Manager switched VS Code Codex to the selected account.',
         'cloud.codex.toast.deferredActivationTitle': 'Codex account queued',
         'cloud.codex.toast.deferredActivationDescription':
-          '{{account}} will be applied to {{runtime}} after VS Code closes.',
+          '{{account}} will be applied to {{runtime}} after you reload or close VS Code.',
         'cloud.errors.codexRuntimeSyncStateSkipped':
           'Extension state was skipped because the source or target state database was missing.',
         'a11y.expand': 'Expand',
@@ -209,6 +215,7 @@ describe('CodexAccountPanel', () => {
           codexCliPath: 'C:\\VSCode\\codex.exe',
           reason: 'ready',
         },
+        liveAccountIdentityKey: null,
         session: {
           state: 'ready',
         },
@@ -239,6 +246,7 @@ describe('CodexAccountPanel', () => {
     mockUseActivateCodexAccount.mockReturnValue(createIdleMutation());
     mockUseDeleteCodexAccount.mockReturnValue(createIdleMutation());
     mockUseSyncCodexRuntimeState.mockReturnValue(createIdleMutation());
+    mockOpenExternalUrl.mockResolvedValue(undefined);
   });
 
   it('uses a fixed 5 minute refresh cadence for Codex status polling', () => {
@@ -273,6 +281,7 @@ describe('CodexAccountPanel', () => {
         pendingRuntimeApply: {
           runtimeId: 'wsl-remote',
           recordId: 'standby-1',
+          requestedAt: 123,
         },
         runtimes: [
           {
@@ -419,94 +428,6 @@ describe('CodexAccountPanel', () => {
     });
   });
 
-  it('renders runtime selection buttons when the active side is ambiguous', () => {
-    mockUseManagedIdeStatus.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-      data: {
-        installation: {
-          available: true,
-          idePath: 'C:\\VSCode\\Code.exe',
-          codexCliPath: 'C:\\VSCode\\codex.exe',
-          reason: 'ready',
-        },
-        session: {
-          state: 'ready',
-        },
-        activeRuntimeId: null,
-        requiresRuntimeSelection: true,
-        hasRuntimeMismatch: false,
-        runtimes: [
-          {
-            id: 'windows-local',
-            installation: { available: true },
-            session: { state: 'ready' },
-          },
-          {
-            id: 'wsl-remote',
-            installation: { available: true },
-            session: { state: 'requires_login' },
-          },
-        ],
-      },
-    });
-
-    render(React.createElement(CodexAccountPanel));
-
-    expect(screen.getByTestId('codex-runtime-selection')).toBeTruthy();
-    expect(screen.getByText('Runtime selection needed')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Use Windows Local/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Use WSL Remote/i })).toBeTruthy();
-  });
-
-  it('stores the selected runtime override when the user resolves ambiguity', () => {
-    const refetch = vi.fn();
-    mockUseManagedIdeStatus.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch,
-      data: {
-        installation: {
-          available: true,
-          idePath: 'C:\\VSCode\\Code.exe',
-          codexCliPath: 'C:\\VSCode\\codex.exe',
-          reason: 'ready',
-        },
-        session: {
-          state: 'ready',
-        },
-        activeRuntimeId: null,
-        requiresRuntimeSelection: true,
-        hasRuntimeMismatch: false,
-        runtimes: [
-          {
-            id: 'windows-local',
-            installation: { available: true },
-            session: { state: 'ready' },
-          },
-          {
-            id: 'wsl-remote',
-            installation: { available: true },
-            session: { state: 'requires_login' },
-          },
-        ],
-      },
-    });
-
-    render(React.createElement(CodexAccountPanel));
-
-    fireEvent.click(screen.getByRole('button', { name: /Use Windows Local/i }));
-
-    expect(mockSaveConfig).toHaveBeenCalledWith({
-      codex_auto_switch_enabled: false,
-      grid_layout: '2-col',
-      codex_runtime_override: 'windows-local',
-    });
-  });
-
   it('selects only deletable inactive accounts for batch delete', () => {
     mockUseCodexAccounts.mockReturnValue({
       isLoading: false,
@@ -536,6 +457,53 @@ describe('CodexAccountPanel', () => {
     expect(screen.getAllByText('standby-1@example.com')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Expand' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Collapse' })).toBeNull();
+  });
+
+  it('prefers the live runtime identity when marking the active Codex card', () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        liveAccountIdentityKey: 'standby-1-account',
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        pendingRuntimeApply: null,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+        ],
+      },
+    });
+    mockUseCodexAccounts.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [createAccount('stale-active', { isActive: true }), createAccount('standby-1')],
+      refetch: vi.fn(),
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    const liveHeading = screen.getByRole('heading', { name: 'standby-1@example.com' });
+    const staleHeading = screen.getByRole('heading', { name: 'stale-active@example.com' });
+
+    expect(liveHeading.parentElement?.textContent).toContain('Active');
+    expect(staleHeading.parentElement?.textContent).not.toContain('Active');
+    expect(screen.queryByRole('button', { name: 'Activate' })).toBeTruthy();
   });
 
   it('applies distinct grid classes for 2-col and list layouts', () => {
@@ -581,6 +549,7 @@ describe('CodexAccountPanel', () => {
         pendingRuntimeApply: {
           runtimeId: 'wsl-remote',
           recordId: 'standby-1',
+          requestedAt: 123,
         },
         runtimes: [
           {
@@ -604,9 +573,14 @@ describe('CodexAccountPanel', () => {
     expect(screen.getByText('Codex account change is queued')).toBeTruthy();
     expect(
       screen.getByText(
-        'standby-1@example.com is selected for WSL Remote. Close VS Code to apply this account.',
+        'standby-1@example.com is selected for WSL Remote. Reload or close VS Code to apply this account.',
       ),
     ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload VS Code' }));
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith({
+      url: 'vscode://command/workbench.action.reloadWindow',
+      intent: 'vscode_command',
+    });
   });
 
   it('shows a deferred activation toast when VS Code must close before apply', () => {
@@ -649,7 +623,8 @@ describe('CodexAccountPanel', () => {
 
     expect(mockToast).toHaveBeenLastCalledWith({
       title: 'Codex account queued',
-      description: 'standby-1@example.com will be applied to WSL Remote after VS Code closes.',
+      description:
+        'standby-1@example.com will be applied to WSL Remote after you reload or close VS Code.',
     });
   });
 

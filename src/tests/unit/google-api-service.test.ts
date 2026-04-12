@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type GoogleOAuthBuildGlobals = typeof globalThis & {
   __APPLYRON_GOOGLE_CLIENT_ID__?: string;
@@ -7,6 +7,7 @@ type GoogleOAuthBuildGlobals = typeof globalThis & {
 
 describe('GoogleAPIService OAuth configuration', () => {
   const buildGlobals = globalThis as GoogleOAuthBuildGlobals;
+  const originalFetch = globalThis.fetch;
   const originalClientId = process.env.APPLYRON_GOOGLE_CLIENT_ID;
   const originalClientSecret = process.env.APPLYRON_GOOGLE_CLIENT_SECRET;
   const originalEmbeddedClientId = buildGlobals.__APPLYRON_GOOGLE_CLIENT_ID__;
@@ -43,6 +44,14 @@ describe('GoogleAPIService OAuth configuration', () => {
     } else {
       buildGlobals.__APPLYRON_GOOGLE_CLIENT_SECRET__ = originalEmbeddedClientSecret;
     }
+
+    if (originalFetch === undefined) {
+      Reflect.deleteProperty(globalThis, 'fetch');
+    } else {
+      globalThis.fetch = originalFetch;
+    }
+
+    vi.restoreAllMocks();
   });
 
   it('rejects auth URL generation when OAuth env vars are missing', async () => {
@@ -72,5 +81,95 @@ describe('GoogleAPIService OAuth configuration', () => {
 
     expect(url).toContain('client_id=embedded-client-id');
     expect(url).toContain('redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback');
+  });
+
+  it('ignores quota models whose remaining fraction is missing or non-numeric', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: {
+          'gemini-2.5-flash': {
+            quotaInfo: {
+              remainingFraction: 0.42,
+              resetTime: '2026-03-30T18:00:00.000Z',
+            },
+          },
+          'gemini-2.5-pro': {
+            quotaInfo: {
+              remainingFraction: 'unknown',
+              resetTime: '2026-03-30T18:00:00.000Z',
+            },
+          },
+          'gemini-2.5-thinking': {
+            quotaInfo: {
+              resetTime: '2026-03-30T18:00:00.000Z',
+            },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { GoogleAPIService } = await import('../../services/GoogleAPIService');
+    const fetchProjectContextSpy = vi
+      .spyOn(GoogleAPIService, 'fetchProjectContext')
+      .mockResolvedValue({
+        projectId: 'resolved-project',
+        subscriptionTier: 'pro',
+      });
+
+    const quota = await GoogleAPIService.fetchQuota('access-token');
+
+    expect(fetchProjectContextSpy).toHaveBeenCalledWith('access-token');
+    expect(quota.subscription_tier).toBe('pro');
+    expect(quota.models).toEqual({
+      'gemini-2.5-flash': {
+        percentage: 42,
+        resetTime: '2026-03-30T18:00:00.000Z',
+        display_name: undefined,
+        supports_images: undefined,
+        supports_thinking: undefined,
+        thinking_budget: undefined,
+        recommended: undefined,
+        max_tokens: undefined,
+        max_output_tokens: undefined,
+        supported_mime_types: undefined,
+      },
+    });
+  });
+
+  it('reuses a stored project id without reloading project context', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: {
+          'gemini-2.5-flash': {
+            quotaInfo: {
+              remainingFraction: 0.77,
+              resetTime: '2026-03-30T18:00:00.000Z',
+            },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { GoogleAPIService } = await import('../../services/GoogleAPIService');
+    const fetchProjectContextSpy = vi.spyOn(GoogleAPIService, 'fetchProjectContext');
+
+    const quota = await GoogleAPIService.fetchQuota('access-token', {
+      projectId: 'stored-project',
+      subscriptionTier: 'enterprise',
+    });
+
+    expect(fetchProjectContextSpy).not.toHaveBeenCalled();
+    expect(quota.subscription_tier).toBe('enterprise');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ project: 'stored-project' }),
+      }),
+    );
   });
 });

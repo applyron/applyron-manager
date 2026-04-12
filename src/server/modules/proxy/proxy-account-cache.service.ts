@@ -196,7 +196,17 @@ export class ProxyAccountCacheService {
       return null;
     }
 
-    const latestQuota = await GoogleAPIService.fetchQuota(tokenData.access_token);
+    const latestQuota = await GoogleAPIService.fetchQuota(tokenData.access_token, {
+      projectId: normalizeProjectId(tokenData.project_id),
+      subscriptionTier: tokenData.quota?.subscription_tier,
+    });
+    if (Object.keys(latestQuota.models).length === 0) {
+      this.logger.warn(
+        `Skipping realtime quota overwrite for ${accountId} because the refresh returned no valid models.`,
+      );
+      return this.findEarliestQuotaResetTime(tokenData.model_reset_times);
+    }
+
     const extractedState = this.extractQuotaSnapshot(latestQuota);
     const quotaChanged = hasOperationalQuotaChange(tokenData.quota, latestQuota);
 

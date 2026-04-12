@@ -48,6 +48,7 @@ async function createAntigravityStatus(): Promise<ManagedIdeCurrentStatus> {
       agentMode: null,
       lastUpdatedAt,
     },
+    liveAccountIdentityKey: null,
     quota: null,
     quotaByLimitId: null,
     isProcessRunning: await isManagedIdeProcessRunning('antigravity'),

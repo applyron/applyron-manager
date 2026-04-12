@@ -48,6 +48,7 @@ export type CodexLiveApplyResult = {
 export interface DeferredCodexRuntimeApply {
   runtimeId: CodexRuntimeId;
   recordId: string;
+  requestedAt: number;
 }
 
 export interface DeferredRuntimeApplyStateBag {

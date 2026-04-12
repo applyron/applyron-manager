@@ -5,6 +5,19 @@ vi.mock('find-process', () => ({
   default: vi.fn(),
 }));
 
+const { mockExecSync } = vi.hoisted(() => ({
+  mockExecSync: vi.fn(),
+}));
+
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+  execSync: mockExecSync,
+  default: {
+    exec: vi.fn(),
+    execSync: mockExecSync,
+  },
+}));
+
 // Mock logger to avoid console output during tests
 vi.mock('../../utils/logger', () => ({
   logger: {
@@ -22,7 +35,12 @@ vi.mock('../../utils/paths', () => ({
 }));
 
 // Import after mocks are set up
-import { isProcessRunning, closeAntigravity, startAntigravity } from '../../ipc/process/handler';
+import {
+  isManagedIdeProcessRunning,
+  isProcessRunning,
+  closeAntigravity,
+  startAntigravity,
+} from '../../ipc/process/handler';
 import findProcess from 'find-process';
 
 describe('Process Handler', () => {
@@ -30,6 +48,7 @@ describe('Process Handler', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockExecSync.mockReset();
   });
 
   describe('isProcessRunning', () => {
@@ -169,6 +188,26 @@ describe('Process Handler', () => {
 
       const result = await isProcessRunning();
       expect(result).toBe(false);
+    });
+
+    it('should only treat the main Code.exe process as running for VS Code Codex on Windows', async () => {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      Object.defineProperty(process, 'pid', { value: 1000, configurable: true });
+      mockExecSync.mockReturnValue('22345\r\n');
+
+      const result = await isManagedIdeProcessRunning('vscode-codex');
+      expect(result).toBe(true);
+      expect(mockFindProcess).not.toHaveBeenCalled();
+    });
+
+    it('should ignore updater and helper-like Code.exe processes for VS Code Codex on Windows', async () => {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      Object.defineProperty(process, 'pid', { value: 1000, configurable: true });
+      mockExecSync.mockReturnValue('');
+
+      const result = await isManagedIdeProcessRunning('vscode-codex');
+      expect(result).toBe(false);
+      expect(mockFindProcess).not.toHaveBeenCalled();
     });
   });
 

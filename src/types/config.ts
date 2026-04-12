@@ -51,12 +51,14 @@ const CodexPendingRuntimeApplySchema = z
   .object({
     runtimeId: z.enum(['windows-local', 'wsl-remote']),
     recordId: z.string().min(1).optional(),
+    requestedAt: z.number().optional(),
   })
   .transform((value) =>
     value.recordId
       ? {
           runtimeId: value.runtimeId,
           recordId: value.recordId,
+          requestedAt: value.requestedAt ?? Date.now(),
         }
       : null,
   )

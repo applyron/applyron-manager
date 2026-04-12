@@ -14,6 +14,7 @@ const mockOpenExternalUrl = vi.fn();
 const mockUseAppUpdateStatus = vi.fn();
 const mockUseCloudAccounts = vi.fn();
 const mockUseCodexAccounts = vi.fn();
+const mockUseManagedIdeStatus = vi.fn();
 const mockUseAppConfig = vi.fn();
 const mockUseConnectivityStatus = vi.fn();
 const mockToast = vi.fn();
@@ -40,6 +41,7 @@ vi.mock('@/hooks/useCloudAccounts', () => ({
 
 vi.mock('@/hooks/useManagedIde', () => ({
   useCodexAccounts: () => mockUseCodexAccounts(),
+  useManagedIdeStatus: (...args: unknown[]) => mockUseManagedIdeStatus(...args),
 }));
 
 vi.mock('@/hooks/useAppConfig', () => ({
@@ -270,6 +272,14 @@ describe('DashboardPage', () => {
       ],
       isLoading: false,
     });
+    mockUseManagedIdeStatus.mockReturnValue({
+      data: {
+        liveAccountIdentityKey: null,
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
 
     const updateStatus: AppUpdateStatus = {
       status: 'up_to_date',
@@ -353,6 +363,11 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText('Antigravity').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Codex').length).toBeGreaterThan(0);
     expect(mockUseAppUpdateStatus).toHaveBeenCalledWith(undefined);
+    expect(mockUseManagedIdeStatus).toHaveBeenCalledWith('vscode-codex', {
+      enabled: true,
+      refresh: false,
+      refetchInterval: false,
+    });
 
     await userEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
 
@@ -403,6 +418,65 @@ describe('DashboardPage', () => {
     expect(await screen.findAllByText('An unexpected error occurred.')).toHaveLength(2);
     expect(screen.queryByText('No active Antigravity account selected.')).toBeNull();
     expect(screen.queryByText('No active Codex account selected.')).toBeNull();
+  });
+
+  it('prefers the live Codex runtime identity over a stale stored active flag', async () => {
+    mockUseCodexAccounts.mockReturnValue({
+      data: [
+        {
+          id: 'codex-stale',
+          email: 'stale@example.com',
+          label: 'Stale Active',
+          accountId: 'acc-stale',
+          authMode: 'chatgpt',
+          isActive: true,
+          sortOrder: 0,
+          createdAt: 1,
+          updatedAt: 2,
+          lastRefreshedAt: 3,
+          snapshot: {
+            session: {
+              state: 'ready',
+              planType: 'plus',
+            },
+            quota: null,
+          },
+        },
+        {
+          id: 'codex-live',
+          email: 'live@example.com',
+          label: 'Live Active',
+          accountId: 'acc-live',
+          authMode: 'chatgpt',
+          isActive: false,
+          sortOrder: 1,
+          createdAt: 4,
+          updatedAt: 5,
+          lastRefreshedAt: 6,
+          snapshot: {
+            session: {
+              state: 'ready',
+              planType: 'plus',
+            },
+            quota: null,
+          },
+        },
+      ],
+      isLoading: false,
+    });
+    mockUseManagedIdeStatus.mockReturnValue({
+      data: {
+        liveAccountIdentityKey: 'acc-live',
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
+
+    renderDashboard();
+
+    expect(await screen.findByText('Live Active')).toBeTruthy();
+    expect(screen.queryByText('Stale Active')).toBeNull();
   });
 
   it('disables the update button while a check is already in progress', async () => {

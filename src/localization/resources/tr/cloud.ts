@@ -71,7 +71,8 @@ export const trCloud = {
       pendingApply: {
         title: 'Codex hesap değişimi sıraya alındı',
         description:
-          '{{account}} hesabı {{runtime}} için seçildi. Bu hesabı uygulamak için VS Code’u kapatın.',
+          '{{account}} hesabı {{runtime}} için seçildi. Bu hesabı uygulamak için VS Code’u yeniden yükleyin veya kapatın.',
+        reloadAction: 'VS Code’u yeniden yükle',
       },
       confirmDelete: '{{target}} hesabı Codex havuzundan kaldırılsın mı?',
       windows: {
@@ -107,7 +108,7 @@ export const trCloud = {
         activatedDescription: "Applyron Manager, VS Code Codex'i seçilen hesaba geçirdi.",
         deferredActivationTitle: 'Codex hesabı sıraya alındı',
         deferredActivationDescription:
-          '{{account}} hesabı, VS Code kapandıktan sonra {{runtime}} tarafına uygulanacak.',
+          '{{account}} hesabı, VS Code’u yeniden yükledikten veya kapattıktan sonra {{runtime}} tarafına uygulanacak.',
         activateFailedTitle: 'Codex hesabı etkinleştirilemedi',
         deletedTitle: 'Codex hesabı kaldırıldı',
         deletedDescription: 'Seçilen Codex hesabı Applyron havuzundan kaldırıldı.',

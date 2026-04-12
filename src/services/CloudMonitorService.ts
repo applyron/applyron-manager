@@ -123,7 +123,16 @@ export class CloudMonitorService {
 
   private async pollSingleAccount(account: CloudAccount, nowSeconds: number): Promise<void> {
     const accessToken = await this.warmAccountState(account, nowSeconds);
-    const quota = await GoogleAPIService.fetchQuota(accessToken);
+    const quota = await GoogleAPIService.fetchQuota(accessToken, {
+      projectId: normalizeProjectId(account.token.project_id),
+      subscriptionTier: account.quota?.subscription_tier,
+    });
+    if (Object.keys(quota.models).length === 0) {
+      logger.warn(
+        `Monitor: Quota refresh for ${account.email} returned no valid models; keeping the previous snapshot.`,
+      );
+      return;
+    }
 
     if (hasOperationalQuotaChange(account.quota, quota)) {
       await CloudAccountRepo.updateQuota(account.id, quota);

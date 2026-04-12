@@ -8,6 +8,10 @@ import type { CodexGlobalStateMutationResult, CodexGlobalStateSnapshot } from '.
 
 const codexGlobalStateLockUntilByPath = new Map<string, number>();
 
+export function resetCodexGlobalStateLockTrackingForTesting(): void {
+  codexGlobalStateLockUntilByPath.clear();
+}
+
 function getStringCandidate(
   source: Record<string, unknown> | null | undefined,
   keys: string[],

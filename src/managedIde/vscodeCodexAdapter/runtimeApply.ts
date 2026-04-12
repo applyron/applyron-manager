@@ -1,14 +1,10 @@
 import fs from 'fs';
 import { ConfigManager } from '../../ipc/config/manager';
-import {
-  closeManagedIde,
-  isManagedIdeProcessRunning,
-  startManagedIde,
-} from '../../ipc/process/handler';
+import { isManagedIdeProcessRunning, startManagedIde } from '../../ipc/process/handler';
 import { logger } from '../../utils/logger';
 import { CodexAccountStore } from '../codexAccountStore';
 import { readCodexAuthFile, removeCodexAuthFile, writeCodexAuthFile } from '../codexAuth';
-import { CODEX_ACCOUNT_APPLY_VERIFY_POLL_MS, CODEX_ACCOUNT_APPLY_VERIFY_TIMEOUT_MS, CODEX_DEFERRED_RUNTIME_APPLY_POLL_MS } from './constants';
+import { CODEX_DEFERRED_RUNTIME_APPLY_POLL_MS } from './constants';
 import { clearCodexGlobalStateSnapshot, readCodexGlobalStateSnapshot, writeCodexGlobalStateSnapshot } from './globalStateDb';
 import {
   markAccountHydrationLive,
@@ -22,6 +18,8 @@ import {
 } from './accountIdentity';
 import {
   createRuntimeSelection,
+  getCompanionCodexRuntimes,
+  getPrimaryCodexRuntime,
   getRuntimeById,
   isWindowsWslRemoteRuntime,
   resetWslRemoteVsCodeProcesses,
@@ -60,7 +58,8 @@ export async function persistDeferredRuntimeApply(
   const currentPendingRuntimeApply = config.codex_pending_runtime_apply;
   if (
     currentPendingRuntimeApply?.runtimeId === pendingRuntimeApply?.runtimeId &&
-    currentPendingRuntimeApply?.recordId === pendingRuntimeApply?.recordId
+    currentPendingRuntimeApply?.recordId === pendingRuntimeApply?.recordId &&
+    currentPendingRuntimeApply?.requestedAt === pendingRuntimeApply?.requestedAt
   ) {
     return;
   }
@@ -106,6 +105,168 @@ export function resolveProcessRunningState(
   return cachedProcessState ?? false;
 }
 
+type RuntimeApplyTargetSnapshot = {
+  runtime: CodexRuntimeEnvironment;
+  previousAuthFile: CodexAuthFile | null;
+  rollbackAuthFile: CodexAuthFile | null;
+  previousStateRawValue: string | null;
+  stateDbPath: string | null;
+};
+
+function getRuntimeApplyTargets(
+  selection: CodexResolvedRuntimeSelection,
+): CodexRuntimeEnvironment[] {
+  const primaryRuntime = getPrimaryCodexRuntime(selection);
+  if (!primaryRuntime || !primaryRuntime.authFilePath) {
+    return [];
+  }
+
+  return [
+    primaryRuntime,
+    ...getCompanionCodexRuntimes(selection, primaryRuntime).filter((runtime) =>
+      Boolean(runtime.authFilePath),
+    ),
+  ];
+}
+
+function captureRuntimeApplySnapshot(
+  runtime: CodexRuntimeEnvironment,
+  options?: { includeStateSnapshot?: boolean; rollbackAuthFile?: CodexAuthFile | null },
+): RuntimeApplyTargetSnapshot | null {
+  if (!runtime.authFilePath) {
+    return null;
+  }
+
+  const stateDbPath =
+    runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null;
+
+  return {
+    runtime,
+    previousAuthFile: readCodexAuthFile(runtime.authFilePath),
+    rollbackAuthFile: options?.rollbackAuthFile ?? null,
+    previousStateRawValue:
+      options?.includeStateSnapshot === true && stateDbPath
+        ? readCodexGlobalStateSnapshot(stateDbPath).rawValue
+        : null,
+    stateDbPath,
+  };
+}
+
+function restoreRuntimeGlobalStateSnapshot(target: RuntimeApplyTargetSnapshot): void {
+  if (!target.stateDbPath || !target.previousStateRawValue) {
+    return;
+  }
+
+  const restoreResult = writeCodexGlobalStateSnapshot(
+    target.stateDbPath,
+    target.previousStateRawValue,
+  );
+  if (!restoreResult.ok && restoreResult.reason !== 'missing') {
+    logger.warn(
+      `Failed to restore VS Code Codex global state after runtime apply rollback for ${target.runtime.id}`,
+    );
+  }
+}
+
+function rollbackRuntimeApply(targets: RuntimeApplyTargetSnapshot[]): void {
+  for (const target of [...targets].reverse()) {
+    try {
+      restoreRuntimeAuthFile(
+        target.runtime,
+        target.rollbackAuthFile ?? target.previousAuthFile,
+      );
+    } catch (error) {
+      logger.warn(
+        `Failed to restore the previous Codex auth file for ${target.runtime.id} during rollback`,
+        error,
+      );
+    }
+
+    try {
+      restoreRuntimeGlobalStateSnapshot(target);
+    } catch (error) {
+      logger.warn(
+        `Failed to restore the previous VS Code Codex state snapshot for ${target.runtime.id} during rollback`,
+        error,
+      );
+    }
+  }
+}
+
+function applyAuthToRuntimeTargets(input: {
+  runtimes: CodexRuntimeEnvironment[];
+  authFile: CodexAuthFile;
+  clearState: boolean;
+  rollbackAuthFile?: CodexAuthFile | null;
+}): boolean {
+  const appliedTargets: RuntimeApplyTargetSnapshot[] = [];
+  try {
+    for (const runtime of input.runtimes) {
+      const targetSnapshot = captureRuntimeApplySnapshot(runtime, {
+        includeStateSnapshot: input.clearState,
+        rollbackAuthFile: input.rollbackAuthFile ?? null,
+      });
+      if (!targetSnapshot || !runtime.authFilePath) {
+        continue;
+      }
+
+      writeCodexAuthFile(input.authFile, runtime.authFilePath);
+      appliedTargets.push(targetSnapshot);
+
+      if (!input.clearState) {
+        continue;
+      }
+
+      if (isWindowsWslRemoteRuntime(runtime)) {
+        resetWslRemoteVsCodeProcesses(runtime);
+      }
+
+      const clearStateResult = clearCodexGlobalStateSnapshot(targetSnapshot.stateDbPath);
+      if (!clearStateResult.ok && clearStateResult.reason !== 'missing') {
+        rollbackRuntimeApply(appliedTargets);
+        return false;
+      }
+    }
+
+    return appliedTargets.length > 0;
+  } catch (error) {
+    logger.warn('Failed to apply a deferred Codex runtime change', error);
+    rollbackRuntimeApply(appliedTargets);
+    return false;
+  }
+}
+
+export async function finalizeDeferredRuntimeApply(input: {
+  state: DeferredRuntimeApplyStateBag;
+  status?: ManagedIdeCurrentStatus | null;
+}): Promise<CodexAccountRecord | null> {
+  const deferredRuntimeApply = getDeferredRuntimeApply(input.state);
+  if (!deferredRuntimeApply) {
+    return null;
+  }
+
+  const account = await CodexAccountStore.getAccount(deferredRuntimeApply.recordId);
+  const authFile = await CodexAccountStore.readAuthFile(deferredRuntimeApply.recordId);
+  if (!account || !authFile?.tokens?.account_id) {
+    logger.warn(
+      'Dropping deferred Codex runtime apply because the target account or auth file is no longer available',
+    );
+    await persistDeferredRuntimeApply(input.state, null);
+    stopDeferredRuntimeApplyWatcher(input.state);
+    return null;
+  }
+
+  const persistedAccount = await persistActivatedAccount({
+    account,
+    authFile,
+    status: input.status ?? null,
+  });
+  await markAccountHydrationLive(account.id);
+  await persistDeferredRuntimeApply(input.state, null);
+  stopDeferredRuntimeApplyWatcher(input.state);
+  return persistedAccount;
+}
+
 export async function flushDeferredRuntimeApplyIfPossible(input: {
   state: DeferredRuntimeApplyStateBag;
   options?: { assumeIdeStopped?: boolean };
@@ -122,26 +283,18 @@ export async function flushDeferredRuntimeApplyIfPossible(input: {
     return false;
   }
 
-  if (!input.options?.assumeIdeStopped) {
-    const isProcessRunning = await isManagedIdeProcessRunning('vscode-codex');
-    if (isProcessRunning) {
-      input.ensureDeferredRuntimeApplyWatcher();
-      return false;
-    }
-  }
-
   input.state.deferredRuntimeApplyInFlight = true;
   try {
     const selection = input.resolveRuntimeSelection();
-    const runtime = getRuntimeById(selection, deferredRuntimeApply.runtimeId);
-    if (!runtime) {
+    const applyTargets = getRuntimeApplyTargets(selection);
+    if (applyTargets.length === 0) {
       input.ensureDeferredRuntimeApplyWatcher();
       return false;
     }
 
     const account = await CodexAccountStore.getAccount(deferredRuntimeApply.recordId);
     const authFile = await CodexAccountStore.readAuthFile(deferredRuntimeApply.recordId);
-    if (!account || !authFile?.tokens?.account_id || !runtime.authFilePath) {
+    if (!account || !authFile?.tokens?.account_id) {
       logger.warn(
         'Dropping deferred Codex runtime apply because the target account or auth file is no longer available',
       );
@@ -150,58 +303,38 @@ export async function flushDeferredRuntimeApplyIfPossible(input: {
       return false;
     }
 
-    const stateDbPath =
-      runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null;
-    const previousAuthFile = readCodexAuthFile(runtime.authFilePath);
-    if (isWindowsWslRemoteRuntime(runtime)) {
-      resetWslRemoteVsCodeProcesses(runtime);
-    }
-
-    try {
-      writeCodexAuthFile(authFile, runtime.authFilePath);
-
-      const clearStateResult = clearCodexGlobalStateSnapshot(stateDbPath);
-      if (!clearStateResult.ok && clearStateResult.reason !== 'missing') {
-        input.ensureDeferredRuntimeApplyWatcher();
-        return false;
-      }
-
-      await CodexAccountStore.upsertAccount({
-        existingId: account.id,
-        email: getPreferredCodexEmail(authFile, account.email),
-        label: account.label,
-        accountId: authFile.tokens.account_id,
-        authMode: account.authMode ?? authFile.auth_mode,
-        hydrationState: 'live',
-        workspace: getPreferredPersistedWorkspace({
-          derivedWorkspace: getResolvedCodexWorkspace(
-            authFile,
-            account.snapshot?.session.planType ?? null,
-            account.email,
-          ),
-          existingWorkspace: account.workspace,
-        }),
-        authFile,
-        snapshot: account.snapshot,
-        makeActive: true,
-      });
-
-      await persistDeferredRuntimeApply(input.state, null);
-      stopDeferredRuntimeApplyWatcher(input.state);
-      return true;
-    } catch (error) {
-      logger.warn('Failed to flush deferred Codex runtime apply state', error);
-      try {
-        restoreRuntimeAuthFile(runtime, previousAuthFile);
-      } catch (restoreError) {
-        logger.warn(
-          'Failed to restore the previous Codex auth file after deferred activation flush failure',
-          restoreError,
-        );
-      }
+    const isProcessRunning = input.options?.assumeIdeStopped
+      ? false
+      : await isManagedIdeProcessRunning('vscode-codex');
+    const activeAccount =
+      !isProcessRunning ? await CodexAccountStore.getActiveAccount().catch(() => null) : null;
+    const rollbackAuthFile =
+      !isProcessRunning &&
+      activeAccount &&
+      activeAccount.id !== deferredRuntimeApply.recordId
+        ? await CodexAccountStore.readAuthFile(activeAccount.id).catch(() => null)
+        : null;
+    const didApply = applyAuthToRuntimeTargets({
+      runtimes: applyTargets,
+      authFile,
+      clearState: !isProcessRunning,
+      rollbackAuthFile,
+    });
+    if (!didApply) {
       input.ensureDeferredRuntimeApplyWatcher();
       return false;
     }
+
+    if (isProcessRunning) {
+      input.ensureDeferredRuntimeApplyWatcher();
+      return false;
+    }
+
+    await finalizeDeferredRuntimeApply({
+      state: input.state,
+      status: null,
+    });
+    return true;
   } finally {
     input.state.deferredRuntimeApplyInFlight = false;
   }
@@ -210,11 +343,7 @@ export async function flushDeferredRuntimeApplyIfPossible(input: {
 export function getActiveRuntimeOrThrow(
   selection = createRuntimeSelection(),
 ): CodexRuntimeEnvironment {
-  if (selection.requiresRuntimeSelection || !selection.activeRuntimeId) {
-    throw new Error('CODEX_RUNTIME_SELECTION_REQUIRED');
-  }
-
-  const runtime = getRuntimeById(selection, selection.activeRuntimeId);
+  const runtime = getPrimaryCodexRuntime(selection);
   if (
     !runtime ||
     !runtime.installation.available ||
@@ -231,14 +360,7 @@ export function getImportRestoreTarget(selection = createRuntimeSelection()): {
   runtime: CodexRuntimeEnvironment | null;
   status: CodexImportRestoreResult['status'] | null;
 } {
-  if (selection.requiresRuntimeSelection || !selection.activeRuntimeId) {
-    return {
-      runtime: null,
-      status: 'stored_only_runtime_selection_required',
-    };
-  }
-
-  const runtime = getRuntimeById(selection, selection.activeRuntimeId);
+  const runtime = getPrimaryCodexRuntime(selection);
   if (!runtime || !runtime.installation.available || !runtime.authFilePath) {
     return {
       runtime: null,
@@ -268,139 +390,53 @@ function restoreRuntimeAuthFile(
   removeCodexAuthFile(runtime.authFilePath);
 }
 
-async function waitForRuntimeAccountConvergence(input: {
-  runtime: CodexRuntimeEnvironment;
-  authFile: CodexAuthFile;
-  timeoutMs?: number;
-}): Promise<boolean> {
-  const expectedAccountId = input.authFile.tokens?.account_id ?? null;
-  if (!expectedAccountId || !input.runtime.authFilePath) {
-    return false;
-  }
-
-  const timeoutMs = input.timeoutMs ?? CODEX_ACCOUNT_APPLY_VERIFY_TIMEOUT_MS;
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const runtimeAuthFile = readCodexAuthFile(input.runtime.authFilePath);
-    if (runtimeAuthFile?.tokens?.account_id === expectedAccountId) {
-      return true;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, CODEX_ACCOUNT_APPLY_VERIFY_POLL_MS));
-  }
-
-  return false;
-}
-
-async function restartIdeForAccountApply(
-  runtime: CodexRuntimeEnvironment,
-  options?: { includeProcessTree?: boolean },
-): Promise<void> {
-  const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
-  if (wasRunning) {
-    await closeManagedIde('vscode-codex', {
-      includeProcessTree: options?.includeProcessTree ?? false,
-    });
-  }
-
-  if (isWindowsWslRemoteRuntime(runtime)) {
-    resetWslRemoteVsCodeProcesses(runtime);
-  }
-
-  clearCodexGlobalStateSnapshot(
-    runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null,
-  );
-  await startManagedIde('vscode-codex', false);
-}
-
 export async function applyAccountToRuntime(input: {
   state: DeferredRuntimeApplyStateBag;
   id: string;
-  authFile: CodexAuthFile;
-  runtime: CodexRuntimeEnvironment;
-  forceFullRestart: boolean;
+  selection: CodexResolvedRuntimeSelection;
   ensureDeferredRuntimeApplyWatcher: () => void;
   flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
 }): Promise<CodexLiveApplyResult> {
-  const requiresWslRemoteReset = isWindowsWslRemoteRuntime(input.runtime);
-  const stateDbPath =
-    input.runtime.stateDbPath && fs.existsSync(input.runtime.stateDbPath)
-      ? input.runtime.stateDbPath
-      : null;
-  let previousAuthFile: CodexAuthFile | null = null;
-
-  try {
-    const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
-    let didRestartIde = false;
-
-    if (wasRunning) {
-      await persistDeferredRuntimeApply(input.state, {
-        runtimeId: input.runtime.id,
-        recordId: input.id,
-      });
-      input.ensureDeferredRuntimeApplyWatcher();
-
-      return {
-        runtimeId: input.runtime.id,
-        didRestartIde: false,
-        deferredUntilIdeRestart: true,
-      };
-    }
-
-    await persistDeferredRuntimeApply(input.state, null);
-    previousAuthFile = input.runtime.authFilePath
-      ? readCodexAuthFile(input.runtime.authFilePath)
-      : null;
-    writeCodexAuthFile(input.authFile, input.runtime.authFilePath as string);
-
-    if (requiresWslRemoteReset) {
-      resetWslRemoteVsCodeProcesses(input.runtime);
-    }
-    const clearStateResult = clearCodexGlobalStateSnapshot(stateDbPath);
-    if (!clearStateResult.ok && clearStateResult.reason === 'error') {
-      logger.warn('Failed to clear VS Code global state before applying a Codex account');
-    }
-    await startManagedIde('vscode-codex', false);
-    didRestartIde = true;
-
-    const didConverge = await waitForRuntimeAccountConvergence({
-      runtime: input.runtime,
-      authFile: input.authFile,
-    });
-    if (!didConverge) {
-      logger.warn(
-        'Codex account activation did not converge after the initial VS Code apply; retrying with a stronger restart',
-      );
-      await restartIdeForAccountApply(input.runtime, {
-        includeProcessTree: input.forceFullRestart,
-      });
-      didRestartIde = true;
-
-      const recovered = await waitForRuntimeAccountConvergence({
-        runtime: input.runtime,
-        authFile: input.authFile,
-      });
-      if (!recovered) {
-        throw new Error('CODEX_ACCOUNT_ACTIVATION_DID_NOT_CONVERGE');
-      }
-    }
-
-    return {
-      runtimeId: input.runtime.id,
-      didRestartIde,
-      deferredUntilIdeRestart: false,
-    };
-  } catch (error) {
-    try {
-      restoreRuntimeAuthFile(input.runtime, previousAuthFile);
-    } catch (restoreError) {
-      logger.warn(
-        'Failed to restore the previous Codex auth file after activation failure',
-        restoreError,
-      );
-    }
-    throw error;
+  const primaryRuntime = getPrimaryCodexRuntime(input.selection);
+  const runtimeId =
+    getRuntimeById(input.selection, input.selection.activeRuntimeId)?.installation.available
+      ? (input.selection.activeRuntimeId as CodexRuntimeId)
+      : primaryRuntime?.id ?? null;
+  if (!primaryRuntime || !runtimeId) {
+    throw new Error('CODEX_IDE_UNAVAILABLE');
   }
+
+  const pendingRuntimeApply = {
+    runtimeId,
+    recordId: input.id,
+    requestedAt: Date.now(),
+  };
+  const wasRunning = await isManagedIdeProcessRunning('vscode-codex');
+
+  await persistDeferredRuntimeApply(input.state, pendingRuntimeApply);
+  const didApplyImmediately = await input.flushDeferredRuntimeApplyIfPossible(
+    wasRunning ? undefined : { assumeIdeStopped: true },
+  );
+
+  if (wasRunning) {
+    input.ensureDeferredRuntimeApplyWatcher();
+    return {
+      runtimeId,
+      didRestartIde: false,
+      deferredUntilIdeRestart: true,
+    };
+  }
+
+  if (!didApplyImmediately) {
+    throw new Error('CODEX_ACCOUNT_ACTIVATION_DID_NOT_CONVERGE');
+  }
+
+  await startManagedIde('vscode-codex', false);
+  return {
+    runtimeId,
+    didRestartIde: true,
+    deferredUntilIdeRestart: false,
+  };
 }
 
 async function persistActivatedAccount(input: {
@@ -451,16 +487,13 @@ export async function activateAccount(input: {
       throw new Error('CODEX_AUTH_FILE_NOT_FOUND');
     }
 
-    const runtime = getActiveRuntimeOrThrow(input.resolveRuntimeSelection());
-    const hydrationState = await CodexAccountStore.getHydrationState(input.id);
-    const requiresImportRestore = hydrationState === 'needs_import_restore';
+    const selection = input.resolveRuntimeSelection();
+    getActiveRuntimeOrThrow(selection);
 
     const applyResult = await applyAccountToRuntime({
       state: input.state,
       id: input.id,
-      authFile,
-      runtime,
-      forceFullRestart: requiresImportRestore,
+      selection,
       ensureDeferredRuntimeApplyWatcher: input.ensureDeferredRuntimeApplyWatcher,
       flushDeferredRuntimeApplyIfPossible: input.flushDeferredRuntimeApplyIfPossible,
     });
@@ -532,12 +565,11 @@ export async function restoreImportedAccount(input: {
       };
     }
 
+    const selection = input.resolveRuntimeSelection();
     const applyResult = await applyAccountToRuntime({
       state: input.state,
       id: input.id,
-      authFile,
-      runtime: target.runtime,
-      forceFullRestart: true,
+      selection,
       ensureDeferredRuntimeApplyWatcher: input.ensureDeferredRuntimeApplyWatcher,
       flushDeferredRuntimeApplyIfPossible: input.flushDeferredRuntimeApplyIfPossible,
     });
@@ -560,61 +592,33 @@ export async function restoreImportedAccount(input: {
 export async function syncRuntimeState(
   selection = createRuntimeSelection(),
 ): Promise<CodexRuntimeSyncResult> {
-  if (selection.requiresRuntimeSelection || selection.runtimes.length < 2) {
-    throw new Error('CODEX_RUNTIME_SELECTION_REQUIRED');
-  }
-
-  const runtimePairs = selection.runtimes
-    .filter((runtime) => runtime.installation.available)
-    .map((runtime) => ({
-      runtime,
-      authFile: runtime.authFilePath ? readCodexAuthFile(runtime.authFilePath) : null,
-      hints: readCodexGlobalStateSnapshot(
-        runtime.stateDbPath && fs.existsSync(runtime.stateDbPath) ? runtime.stateDbPath : null,
-      ),
-    }));
-
-  if (runtimePairs.length < 2) {
+  const sourceRuntime = getRuntimeById(selection, 'windows-local');
+  const targetRuntime = getRuntimeById(selection, 'wsl-remote');
+  if (
+    !sourceRuntime?.installation.available ||
+    !targetRuntime?.installation.available
+  ) {
     throw new Error('CODEX_RUNTIME_SYNC_UNAVAILABLE');
   }
 
-  const getRefreshTimestamp = (authFile: CodexAuthFile | null): number | null => {
-    const value = authFile?.last_refresh ? Date.parse(authFile.last_refresh) : Number.NaN;
-    return Number.isFinite(value) ? value : null;
+  const source = {
+    runtime: sourceRuntime,
+    authFile: sourceRuntime.authFilePath ? readCodexAuthFile(sourceRuntime.authFilePath) : null,
+    hints: readCodexGlobalStateSnapshot(
+      sourceRuntime.stateDbPath && fs.existsSync(sourceRuntime.stateDbPath)
+        ? sourceRuntime.stateDbPath
+        : null,
+    ),
   };
-
-  const [firstRuntime, secondRuntime] = runtimePairs;
-  const firstAuthRefresh = getRefreshTimestamp(firstRuntime.authFile);
-  const secondAuthRefresh = getRefreshTimestamp(secondRuntime.authFile);
-
-  let source = firstRuntime;
-  let target = secondRuntime;
-
-  if (
-    typeof firstAuthRefresh === 'number' &&
-    typeof secondAuthRefresh === 'number' &&
-    secondAuthRefresh > firstAuthRefresh
-  ) {
-    source = secondRuntime;
-    target = firstRuntime;
-  } else if (
-    firstAuthRefresh === secondAuthRefresh ||
-    firstAuthRefresh === null ||
-    secondAuthRefresh === null
-  ) {
-    const firstStateUpdatedAt = firstRuntime.hints.updatedAt ?? 0;
-    const secondStateUpdatedAt = secondRuntime.hints.updatedAt ?? 0;
-    if (secondStateUpdatedAt > firstStateUpdatedAt) {
-      source = secondRuntime;
-      target = firstRuntime;
-    } else if (
-      secondStateUpdatedAt === firstStateUpdatedAt &&
-      selection.activeRuntimeId === secondRuntime.runtime.id
-    ) {
-      source = secondRuntime;
-      target = firstRuntime;
-    }
-  }
+  const target = {
+    runtime: targetRuntime,
+    authFile: targetRuntime.authFilePath ? readCodexAuthFile(targetRuntime.authFilePath) : null,
+    hints: readCodexGlobalStateSnapshot(
+      targetRuntime.stateDbPath && fs.existsSync(targetRuntime.stateDbPath)
+        ? targetRuntime.stateDbPath
+        : null,
+    ),
+  };
 
   const warnings: string[] = [];
   let syncedAuthFile = false;

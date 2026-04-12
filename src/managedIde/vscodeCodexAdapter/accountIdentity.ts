@@ -1,6 +1,7 @@
 import { getCodexEmailHint, getCodexWorkspaceFromAuthFile } from '../codexAuth';
 import { getCodexChromeWorkspaceLabel } from '../codexChromeWorkspaceHints';
 import {
+  getCodexIdentityKey,
   getCodexWorkspaceLabel,
   isCodexPersonalWorkspace,
   isCodexTeamPlan,
@@ -49,6 +50,29 @@ export function getResolvedCodexWorkspace(
     ...derivedWorkspace,
     title: workspaceHint,
   };
+}
+
+export function getLiveCodexAccountIdentityKey(input: {
+  authFile: CodexAuthFile | null;
+  planType?: string | null;
+  fallbackEmail?: string | null;
+}): string | null {
+  const accountId = input.authFile?.tokens?.account_id?.trim();
+  if (!accountId) {
+    return null;
+  }
+
+  const resolvedWorkspace = input.authFile
+    ? getResolvedCodexWorkspace(input.authFile, input.planType, input.fallbackEmail)
+    : null;
+  if (isCodexTeamPlan(input.planType) && !resolvedWorkspace) {
+    return null;
+  }
+
+  return getCodexIdentityKey({
+    accountId,
+    workspace: resolvedWorkspace,
+  });
 }
 
 function getWorkspaceSummaryFromSelection(input: {

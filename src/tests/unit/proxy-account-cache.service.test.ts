@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProxyAccountCacheService } from '../../server/modules/proxy/proxy-account-cache.service';
 import { CloudAccountRepo } from '../../ipc/database/cloudHandler';
+import { GoogleAPIService } from '../../services/GoogleAPIService';
 
 vi.mock('../../ipc/database/cloudHandler');
+vi.mock('../../services/GoogleAPIService');
 
 function createCloudAccount(accountId: string, overrides?: Partial<any>) {
   const nowSec = Math.floor(Date.now() / 1000);
@@ -95,5 +97,63 @@ describe('ProxyAccountCacheService', () => {
 
     expect(cache.get('old-account')).toBeUndefined();
     expect(cache.get('new-account')?.access_token).toBe('access-new-account');
+  });
+
+  it('keeps the cached quota snapshot when realtime refresh returns no valid models', async () => {
+    const cache = new ProxyAccountCacheService();
+    cache.replaceTokens(
+      new Map([
+        [
+          'acc-1',
+          {
+            account_id: 'acc-1',
+            email: 'acc-1@example.com',
+            access_token: 'access-acc-1',
+            refresh_token: 'refresh-acc-1',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            expiry_timestamp: Math.floor(Date.now() / 1000) + 3600,
+            project_id: 'project-acc-1',
+            session_id: 'session-1',
+            quota: {
+              models: {
+                'gemini-2.5-flash': {
+                  percentage: 81,
+                  resetTime: '2026-03-30T18:00:00.000Z',
+                },
+              },
+              subscription_tier: 'pro',
+            },
+            model_quotas: {
+              'gemini-2.5-flash': 81,
+            },
+            model_limits: {},
+            model_reset_times: {
+              'gemini-2.5-flash': '2026-03-30T18:00:00.000Z',
+            },
+            model_forwarding_rules: {},
+          },
+        ],
+      ]),
+    );
+    vi.mocked(GoogleAPIService.fetchQuota).mockResolvedValue({
+      models: {},
+      subscription_tier: 'pro',
+    } as never);
+
+    const nextReset = await cache.refreshRealtimeQuota('acc-1');
+
+    expect(GoogleAPIService.fetchQuota).toHaveBeenCalledWith('access-acc-1', {
+      projectId: 'project-acc-1',
+      subscriptionTier: 'pro',
+    });
+    expect(CloudAccountRepo.updateQuota).not.toHaveBeenCalled();
+    expect(nextReset).toBe('2026-03-30T18:00:00.000Z');
+    expect(cache.get('acc-1')?.quota?.models).toEqual({
+      'gemini-2.5-flash': {
+        percentage: 81,
+        resetTime: '2026-03-30T18:00:00.000Z',
+      },
+    });
   });
 });

@@ -273,6 +273,7 @@ vi.mock('child_process', () => {
 });
 
 import { VscodeCodexAdapter } from '../../managedIde/vscodeCodexAdapter';
+import { resetCodexGlobalStateLockTrackingForTesting } from '../../managedIde/vscodeCodexAdapter/globalStateDb';
 
 const extensionDirectoryName = 'openai.chatgpt-26.318.11754-win32-x64';
 const extensionPath = path.join(os.homedir(), '.vscode', 'extensions', extensionDirectoryName);
@@ -412,6 +413,7 @@ function createRuntimeStatus(
     displayName: string;
     installation: Record<string, unknown>;
     session: Record<string, unknown>;
+    liveAccountIdentityKey: string | null;
   }>,
 ) {
   return {
@@ -440,6 +442,7 @@ function createRuntimeStatus(
       agentMode: 'full-access',
       lastUpdatedAt: 123,
     },
+    liveAccountIdentityKey: overrides?.liveAccountIdentityKey ?? 'acc-1',
     quota: null,
     quotaByLimitId: null,
     authFilePath: defaultAuthPath,
@@ -454,6 +457,7 @@ function createRuntimeStatus(
 describe('VscodeCodexAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCodexGlobalStateLockTrackingForTesting();
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const runtimeAuthFiles = new Map<string, ReturnType<typeof createAuthFile> | null>();
 
@@ -644,6 +648,7 @@ describe('VscodeCodexAdapter', () => {
         agentMode: null,
         lastUpdatedAt: 123,
       },
+      liveAccountIdentityKey: null,
       quota: null,
       quotaByLimitId: null,
       isProcessRunning: false,
@@ -704,6 +709,7 @@ describe('VscodeCodexAdapter', () => {
         agentMode: 'full-access',
         lastUpdatedAt: 123,
       },
+      liveAccountIdentityKey: 'acc-1',
       quota: null,
       quotaByLimitId: null,
       isProcessRunning: true,
@@ -762,7 +768,7 @@ describe('VscodeCodexAdapter', () => {
     expect(status.runtimes).toHaveLength(2);
   });
 
-  it('requires manual runtime selection when both runtimes are available and no active side is detected', async () => {
+  it('falls back to Windows Local when both runtimes are available and no active side is detected', async () => {
     mockGetActiveVsCodeWindowRuntimeId.mockReturnValue(null);
     mockResolveWslRuntimeHome.mockReturnValue({
       authority: 'ubuntu',
@@ -774,8 +780,8 @@ describe('VscodeCodexAdapter', () => {
     const adapter = new VscodeCodexAdapter();
     const status = await adapter.getCurrentStatus({ refresh: true });
 
-    expect(status.activeRuntimeId).toBeNull();
-    expect(status.requiresRuntimeSelection).toBe(true);
+    expect(status.activeRuntimeId).toBe('windows-local');
+    expect(status.requiresRuntimeSelection).toBe(false);
     expect(status.runtimes).toHaveLength(2);
   });
 
@@ -1047,7 +1053,7 @@ describe('VscodeCodexAdapter', () => {
     expect(accounts[0]?.workspace?.title).toBe('VSZONE');
   });
 
-  it('creates isolated WSL Codex homes under the WSL user home instead of /tmp', async () => {
+  it('keeps new Codex logins on the Windows host even when the active VS Code window is remote', async () => {
     mockGetActiveVsCodeWindowRuntimeId.mockReturnValue('wsl-remote');
     mockResolveWslRuntimeHome.mockReturnValue({
       authority: 'ubuntu',
@@ -1055,66 +1061,23 @@ describe('VscodeCodexAdapter', () => {
       linuxHomePath: wslLinuxHome,
       accessibleHomePath: wslAccessibleHome,
     });
-    mockReadCodexAuthFile.mockImplementation((filePath?: string) => {
-      if (filePath === wslAuthPath) {
-        return createAuthFile('acc-wsl');
-      }
-      if (filePath === temporaryWslCodexAuthPath) {
-        return createAuthFile('acc-wsl-2');
-      }
-      if (!filePath || filePath === defaultAuthPath) {
-        return createAuthFile('acc-win');
-      }
-      return null;
-    });
-    mockGetCodexEmailHint.mockImplementation((authFile) => {
-      if (authFile?.tokens?.account_id === 'acc-wsl-2') {
-        return 'wsl-login@applyron.com';
-      }
-      if (authFile?.tokens?.account_id === 'acc-wsl') {
-        return 'wsl@applyron.com';
-      }
-      return 'admin@applyron.com';
-    });
-    mockToAccessibleWslPath.mockReturnValue(temporaryWslAccessibleCodexHome);
-    mockExecSync.mockImplementation((command: string, args?: string[]) => {
-      if (
-        command === 'C:\\Windows\\System32\\wsl.exe' &&
-        args?.[0] === '-d' &&
-        args?.[1] === 'Ubuntu' &&
-        args?.[2] === 'sh' &&
-        args?.[3] === '-lc' &&
-        args?.[4]?.includes('mktemp -d -p')
-      ) {
-        return Buffer.from(temporaryWslLinuxCodexHome);
-      }
-      return Buffer.from('');
-    });
 
     const adapter = new VscodeCodexAdapter();
     const accounts = await adapter.addAccount();
 
-    expect(mockExecSync).toHaveBeenCalledWith(
-      'C:\\Windows\\System32\\wsl.exe',
-      [
-        '-d',
-        'Ubuntu',
-        'sh',
-        '-lc',
-        expect.stringContaining(
-          'mkdir -p "/home/ahmet/.applyron-manager/tmp" && mktemp -d -p "/home/ahmet/.applyron-manager/tmp" "applyron-codex-login-XXXXXX"',
-        ),
-      ],
-      expect.objectContaining({
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    );
     expect(mockExecSync).not.toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining([expect.stringContaining('mktemp -d -p /tmp')]),
-      expect.anything(),
+      'C:\\Windows\\System32\\wsl.exe',
+      expect.arrayContaining([
+        expect.stringContaining('mktemp -d -p "/home/ahmet/.applyron-manager/tmp"'),
+      ]),
+      expect.any(Object),
     );
-    expect(accounts[0]?.accountId).toBe('acc-wsl-2');
+    expect(accounts[0]?.accountId).toBe('acc-2');
+    expect(accounts[0]?.email).toBe('ahmet@applyron.com');
+    expect(mockRm).toHaveBeenCalledWith(temporaryCodexHome, {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('rejects duplicate Codex account additions instead of reporting a false new account', async () => {
@@ -1168,6 +1131,7 @@ describe('VscodeCodexAdapter', () => {
         agentMode: 'full-access',
         lastUpdatedAt: 123,
       },
+      liveAccountIdentityKey: 'acc-1',
       quota: null,
       quotaByLimitId: null,
       isProcessRunning: true,
@@ -1227,14 +1191,15 @@ describe('VscodeCodexAdapter', () => {
     const adapter = new VscodeCodexAdapter();
     const result = await adapter.activateAccount('codex-1');
 
-    expect(mockWriteCodexAuthFile).not.toHaveBeenCalled();
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(createAuthFile('acc-1'), defaultAuthPath);
     expect(mockSetActiveAccount).not.toHaveBeenCalled();
     expect(mockSaveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        codex_pending_runtime_apply: {
+        codex_pending_runtime_apply: expect.objectContaining({
           runtimeId: 'windows-local',
           recordId: 'codex-1',
-        },
+          requestedAt: expect.any(Number),
+        }),
       }),
     );
     expect(mockDatabaseRun).not.toHaveBeenCalled();
@@ -1269,33 +1234,101 @@ describe('VscodeCodexAdapter', () => {
 
     expect(mockSaveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        codex_pending_runtime_apply: {
+        codex_pending_runtime_apply: expect.objectContaining({
           runtimeId: 'windows-local',
           recordId: 'codex-imported',
-        },
+          requestedAt: expect.any(Number),
+        }),
       }),
     );
     expect(mockOpenExternal).not.toHaveBeenCalled();
     expect(mockCloseManagedIde).not.toHaveBeenCalled();
     expect(mockStartManagedIde).not.toHaveBeenCalled();
-    expect(mockWriteCodexAuthFile).not.toHaveBeenCalled();
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
+      createAuthFile('acc-imported'),
+      defaultAuthPath,
+    );
     expect(mockSetHydrationState).not.toHaveBeenCalled();
     expect(mockUpsertAccount).not.toHaveBeenCalled();
     expect(result.appliedRuntimeId).toBe('windows-local');
     expect(result.deferredUntilIdeRestart).toBe(true);
   });
 
-  it('starts a new VS Code window when activating an account while VS Code is closed', async () => {
-    mockIsManagedIdeProcessRunning.mockResolvedValue(false);
-    mockGetAccount
-      .mockResolvedValueOnce(createAccountRecord({ id: 'codex-1', accountId: 'acc-1' }))
-      .mockResolvedValueOnce(
-        createAccountRecord({
-          id: 'codex-1',
-          accountId: 'acc-1',
-          isActive: true,
+  it('restores the previous Windows auth when deferred apply cannot clear state.vscdb', async () => {
+    vi.useFakeTimers();
+    try {
+      const lockedError = Object.assign(new Error('database is locked'), {
+        code: 'SQLITE_BUSY',
+      });
+      mockIsManagedIdeProcessRunning
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValue(false);
+      mockGetActiveAccount.mockResolvedValue(
+        createAccountRecord({ id: 'codex-active', accountId: 'acc-1', isActive: true }),
+      );
+      mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-2', accountId: 'acc-2' }));
+      mockReadStoredAuthFile.mockImplementation(async (accountId: string) =>
+        accountId === 'codex-active' ? createAuthFile('acc-1') : createAuthFile('acc-2'),
+      );
+
+      let persistedConfig = {
+        managed_ide_target: 'vscode-codex',
+        codex_runtime_override: null,
+        codex_pending_runtime_apply: null,
+      };
+      mockLoadConfig.mockImplementation(() => persistedConfig);
+      mockSaveConfig.mockImplementation(async (nextConfig) => {
+        persistedConfig = nextConfig;
+      });
+
+      const adapter = new VscodeCodexAdapter();
+      const result = await adapter.activateAccount('codex-2');
+
+      expect(result.deferredUntilIdeRestart).toBe(true);
+      expect(persistedConfig.codex_pending_runtime_apply).toEqual(
+        expect.objectContaining({
+          runtimeId: 'windows-local',
+          recordId: 'codex-2',
+          requestedAt: expect.any(Number),
         }),
       );
+
+      mockDatabaseRun.mockImplementationOnce(() => {
+        throw lockedError;
+      });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
+        createAuthFile('acc-2'),
+        defaultAuthPath,
+      );
+      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
+        createAuthFile('acc-1'),
+        defaultAuthPath,
+      );
+      expect(mockReadCodexAuthFile(defaultAuthPath)).toEqual(createAuthFile('acc-1'));
+      expect(mockUpsertAccount).not.toHaveBeenCalled();
+      expect(persistedConfig.codex_pending_runtime_apply).toEqual(
+        expect.objectContaining({
+          runtimeId: 'windows-local',
+          recordId: 'codex-2',
+          requestedAt: expect.any(Number),
+        }),
+      );
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        'VS Code Codex global state clear skipped because state.vscdb is locked',
+        lockedError,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts a new VS Code window when activating an account while VS Code is closed', async () => {
+    mockIsManagedIdeProcessRunning.mockResolvedValue(false);
+    mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-1', accountId: 'acc-1' }));
     mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-1'));
 
     const adapter = new VscodeCodexAdapter();
@@ -1315,11 +1348,7 @@ describe('VscodeCodexAdapter', () => {
       linuxHomePath: wslLinuxHome,
       accessibleHomePath: wslAccessibleHome,
     });
-    mockGetAccount
-      .mockResolvedValueOnce(createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }))
-      .mockResolvedValueOnce(
-        createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl', isActive: true }),
-      );
+    mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }));
     mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-wsl'));
     mockReadCodexAuthFile.mockImplementation((filePath?: string) => {
       if (filePath === wslAuthPath) {
@@ -1341,16 +1370,18 @@ describe('VscodeCodexAdapter', () => {
     const adapter = new VscodeCodexAdapter();
     await adapter.activateAccount('codex-wsl');
 
-    expect(mockWriteCodexAuthFile).not.toHaveBeenCalled();
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(createAuthFile('acc-wsl'), defaultAuthPath);
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(createAuthFile('acc-wsl'), wslAuthPath);
     expect(mockOpenExternal).not.toHaveBeenCalled();
     expect(mockCloseManagedIde).not.toHaveBeenCalled();
     expect(mockStartManagedIde).not.toHaveBeenCalled();
     expect(mockSaveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        codex_pending_runtime_apply: {
+        codex_pending_runtime_apply: expect.objectContaining({
           runtimeId: 'wsl-remote',
           recordId: 'codex-wsl',
-        },
+          requestedAt: expect.any(Number),
+        }),
       }),
     );
     expect(mockCollectSnapshot).not.toHaveBeenCalled();
@@ -1417,12 +1448,13 @@ describe('VscodeCodexAdapter', () => {
         linuxHomePath: wslLinuxHome,
         accessibleHomePath: wslAccessibleHome,
       });
-      mockIsManagedIdeProcessRunning.mockResolvedValueOnce(true).mockResolvedValue(false);
-      mockGetAccount
-        .mockResolvedValueOnce(createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }))
-        .mockResolvedValueOnce(
-          createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl', isActive: true }),
-        );
+      mockIsManagedIdeProcessRunning
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValue(false);
+      mockGetAccount.mockResolvedValue(
+        createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }),
+      );
       mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-wsl'));
 
       let persistedConfig = {
@@ -1437,10 +1469,13 @@ describe('VscodeCodexAdapter', () => {
 
       const adapter = new VscodeCodexAdapter();
       await adapter.activateAccount('codex-wsl');
-      expect(persistedConfig.codex_pending_runtime_apply).toEqual({
-        runtimeId: 'wsl-remote',
-        recordId: 'codex-wsl',
-      });
+      expect(persistedConfig.codex_pending_runtime_apply).toEqual(
+        expect.objectContaining({
+          runtimeId: 'wsl-remote',
+          recordId: 'codex-wsl',
+          requestedAt: expect.any(Number),
+        }),
+      );
 
       await vi.advanceTimersByTimeAsync(15_000);
 
@@ -1458,7 +1493,7 @@ describe('VscodeCodexAdapter', () => {
           stdio: ['ignore', 'pipe', 'ignore'],
         }),
       );
-      expect(mockDatabaseRun).toHaveBeenCalledTimes(1);
+      expect(mockDatabaseRun).toHaveBeenCalledTimes(2);
       expect(persistedConfig.codex_pending_runtime_apply).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -1481,10 +1516,13 @@ describe('VscodeCodexAdapter', () => {
     const adapter = new VscodeCodexAdapter();
     const result = await adapter.restoreImportedAccount('codex-imported');
 
-    expect(result.status).toBe('stored_only_runtime_selection_required');
-    expect(result.appliedRuntimeId).toBeNull();
-    expect(mockSetActiveAccount).toHaveBeenCalledWith('codex-imported');
-    expect(mockWriteCodexAuthFile).not.toHaveBeenCalled();
+    expect(result.status).toBe('applied');
+    expect(result.appliedRuntimeId).toBe('windows-local');
+    expect(mockSetActiveAccount).not.toHaveBeenCalled();
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
+      createAuthFile('acc-imported'),
+      defaultAuthPath,
+    );
   });
 
   it('defers imported active account restore while the target VS Code window is still running', async () => {
@@ -1503,13 +1541,17 @@ describe('VscodeCodexAdapter', () => {
       status: 'applied',
       warnings: [],
     });
-    expect(mockWriteCodexAuthFile).not.toHaveBeenCalled();
+    expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
+      createAuthFile('acc-imported'),
+      defaultAuthPath,
+    );
     expect(mockSaveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        codex_pending_runtime_apply: {
+        codex_pending_runtime_apply: expect.objectContaining({
           runtimeId: 'windows-local',
           recordId: 'codex-imported',
-        },
+          requestedAt: expect.any(Number),
+        }),
       }),
     );
     expect(mockCloseManagedIde).not.toHaveBeenCalled();
@@ -1519,6 +1561,7 @@ describe('VscodeCodexAdapter', () => {
 
   it('syncs the fresher runtime state into the other runtime', async () => {
     mockGetActiveVsCodeWindowRuntimeId.mockReturnValue('windows-local');
+    mockGetManagedIdeDbPaths.mockReturnValue(['C:\\Temp\\sync-state.vscdb']);
     mockResolveWslRuntimeHome.mockReturnValue({
       authority: 'ubuntu',
       distroName: 'Ubuntu',
@@ -1544,13 +1587,13 @@ describe('VscodeCodexAdapter', () => {
     const adapter = new VscodeCodexAdapter();
     const result = await adapter.syncRuntimeState();
 
-    expect(result.sourceRuntimeId).toBe('wsl-remote');
-    expect(result.targetRuntimeId).toBe('windows-local');
+    expect(result.sourceRuntimeId).toBe('windows-local');
+    expect(result.targetRuntimeId).toBe('wsl-remote');
     expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
       expect.objectContaining({
-        tokens: expect.objectContaining({ account_id: 'acc-wsl' }),
+        tokens: expect.objectContaining({ account_id: 'acc-win' }),
       }),
-      defaultAuthPath,
+      wslAuthPath,
     );
     expect(mockDatabaseRun).toHaveBeenCalled();
   });
