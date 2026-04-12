@@ -97,5 +97,5 @@ export function compareCodexAccounts(left: CodexAccountRecord, right: CodexAccou
 }
 
 export function sortCodexAccounts(accounts: CodexAccountRecord[]): CodexAccountRecord[] {
-  return normalizeCodexAccounts(accounts).sort(compareCodexAccounts);
+  return [...accounts].sort(compareCodexAccounts);
 }

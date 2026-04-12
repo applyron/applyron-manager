@@ -450,7 +450,7 @@ async function applyPortableImportPayload(
 }
 
 function updateDefaultExportDirectory(nextFilePath: string): Promise<void> {
-  const config = ConfigManager.loadConfig();
+  const config = ConfigManager.getCachedConfigOrLoad();
   return ConfigManager.saveConfig({
     ...config,
     default_export_path: path.dirname(nextFilePath),
@@ -462,7 +462,9 @@ export async function pickExportBundlePath(input?: {
 }): Promise<FilePickerResult> {
   const options = {
     defaultPath: path.join(
-      input?.defaultDirectory || ConfigManager.loadConfig().default_export_path || getAgentDir(),
+      input?.defaultDirectory ||
+        ConfigManager.getCachedConfigOrLoad().default_export_path ||
+        getAgentDir(),
       getSuggestedExportFileName(),
     ),
     filters: [
@@ -488,7 +490,9 @@ export async function pickImportBundleFile(input?: {
 }): Promise<FilePickerResult> {
   const options: OpenDialogOptions = {
     defaultPath:
-      input?.defaultDirectory || ConfigManager.loadConfig().default_export_path || getAgentDir(),
+      input?.defaultDirectory ||
+      ConfigManager.getCachedConfigOrLoad().default_export_path ||
+      getAgentDir(),
     properties: ['openFile'],
     filters: [
       {

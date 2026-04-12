@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -9,6 +9,7 @@ interface VsCodeWindowStateStorage {
   windowsState?: {
     lastActiveWindow?: {
       folder?: string;
+      remoteAuthority?: string;
     } | null;
   } | null;
   backupWorkspaces?: {
@@ -24,6 +25,19 @@ export interface WslRuntimeHome {
   distroName: string;
   linuxHomePath: string;
   accessibleHomePath: string;
+}
+
+export function getWslExecutableCommand(): string {
+  if (isWsl()) {
+    return '/mnt/c/Windows/System32/wsl.exe';
+  }
+
+  if (process.platform === 'win32') {
+    const systemRoot = process.env.SystemRoot?.trim() || 'C:\\Windows';
+    return path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  }
+
+  return 'wsl.exe';
 }
 
 function normalizeCommandOutput(output: Buffer | string): string {
@@ -78,15 +92,19 @@ export function normalizeWslAuthority(value: string | null | undefined): string 
 export function getActiveVsCodeWindowRuntimeId(): CodexRuntimeId | null {
   const storage = readWindowsVsCodeStorage();
   const folder = storage?.windowsState?.lastActiveWindow?.folder?.trim();
-  if (!folder) {
-    return null;
-  }
+  const remoteAuthority = normalizeWslAuthority(
+    storage?.windowsState?.lastActiveWindow?.remoteAuthority,
+  );
 
-  if (folder.startsWith('vscode-remote://wsl%2B')) {
+  if (folder?.startsWith('vscode-remote://wsl%2B')) {
     return 'wsl-remote';
   }
 
-  if (folder.startsWith('file:///')) {
+  if (remoteAuthority) {
+    return 'wsl-remote';
+  }
+
+  if (folder?.startsWith('file:///')) {
     return 'windows-local';
   }
 
@@ -95,6 +113,13 @@ export function getActiveVsCodeWindowRuntimeId(): CodexRuntimeId | null {
 
 export function getActiveVsCodeWslAuthority(): string | null {
   const storage = readWindowsVsCodeStorage();
+  const remoteAuthority = normalizeWslAuthority(
+    storage?.windowsState?.lastActiveWindow?.remoteAuthority,
+  );
+  if (remoteAuthority) {
+    return remoteAuthority;
+  }
+
   const folder = storage?.windowsState?.lastActiveWindow?.folder?.trim();
   if (!folder?.startsWith('vscode-remote://wsl%2B')) {
     return null;
@@ -128,7 +153,7 @@ function getWindowsWslDistros(): string[] {
   }
 
   try {
-    const output = execSync('wsl.exe -l -q', {
+    const output = execFileSync(getWslExecutableCommand(), ['-l', '-q'], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return normalizeCommandOutput(output)
@@ -150,10 +175,6 @@ function resolveDistroName(authorityHint: string | null): string | null {
   }
 
   const candidates = getWindowsWslDistros();
-  if (candidates.length === 0) {
-    return null;
-  }
-
   if (authorityHint) {
     const exactMatch =
       candidates.find((candidate) => candidate.toLowerCase() === authorityHint.toLowerCase()) ??
@@ -161,6 +182,12 @@ function resolveDistroName(authorityHint: string | null): string | null {
     if (exactMatch) {
       return exactMatch;
     }
+
+    return authorityHint;
+  }
+
+  if (candidates.length === 0) {
+    return null;
   }
 
   return candidates.length === 1 ? candidates[0] : null;
@@ -171,10 +198,24 @@ function getWindowsAccessibleWslPath(distroName: string, linuxPath: string): str
   return `\\\\wsl$\\${distroName}\\${normalizedLinuxPath}`;
 }
 
+function createWindowsRuntimeHome(
+  distroName: string,
+  authority: string | null,
+  linuxHomePath: string,
+): WslRuntimeHome {
+  return {
+    authority: authority ?? distroName.toLowerCase(),
+    distroName,
+    linuxHomePath,
+    accessibleHomePath: getWindowsAccessibleWslPath(distroName, linuxHomePath),
+  };
+}
+
 function readWindowsWslHomePath(distroName: string): string | null {
   try {
-    const output = execSync(
-      `wsl.exe -d ${JSON.stringify(distroName)} sh -lc 'printf "%s" "$HOME"'`,
+    const output = execFileSync(
+      getWslExecutableCommand(),
+      ['-d', distroName, 'sh', '-lc', 'printf "%s" "$HOME"'],
       {
         stdio: ['ignore', 'pipe', 'ignore'],
       },
@@ -189,14 +230,15 @@ function readWindowsWslHomePath(distroName: string): string | null {
 export function resolveWslRuntimeHome(authorityHint?: string | null): WslRuntimeHome | null {
   const normalizedAuthority = normalizeWslAuthority(authorityHint) ?? authorityHint?.trim() ?? null;
   const distroName = resolveDistroName(normalizedAuthority);
-  if (!distroName) {
-    return null;
-  }
 
   if (isWsl()) {
     return {
-      authority: normalizedAuthority ?? distroName.toLowerCase(),
-      distroName,
+      authority:
+        normalizedAuthority ??
+        process.env.WSL_DISTRO_NAME?.trim().toLowerCase() ??
+        distroName?.toLowerCase() ??
+        'wsl',
+      distroName: process.env.WSL_DISTRO_NAME?.trim() || distroName || 'wsl',
       linuxHomePath: os.homedir(),
       accessibleHomePath: os.homedir(),
     };
@@ -206,17 +248,42 @@ export function resolveWslRuntimeHome(authorityHint?: string | null): WslRuntime
     return null;
   }
 
-  const linuxHomePath = readWindowsWslHomePath(distroName);
-  if (!linuxHomePath) {
-    return null;
+  const candidates = [
+    ...(distroName ? [distroName] : []),
+    ...getWindowsWslDistros().filter((candidate) => candidate !== distroName),
+  ];
+
+  let fallbackHome: WslRuntimeHome | null = null;
+
+  for (const candidate of candidates) {
+    const linuxHomePath = readWindowsWslHomePath(candidate);
+    if (!linuxHomePath) {
+      continue;
+    }
+
+    const runtimeHome = createWindowsRuntimeHome(
+      candidate,
+      candidate === distroName ? normalizedAuthority : null,
+      linuxHomePath,
+    );
+
+    if (candidate === distroName) {
+      return runtimeHome;
+    }
+
+    const extensionsRoot = path.join(
+      runtimeHome.accessibleHomePath,
+      '.vscode-server',
+      'extensions',
+    );
+    if (fs.existsSync(extensionsRoot)) {
+      return runtimeHome;
+    }
+
+    fallbackHome ??= runtimeHome;
   }
 
-  return {
-    authority: normalizedAuthority ?? distroName.toLowerCase(),
-    distroName,
-    linuxHomePath,
-    accessibleHomePath: getWindowsAccessibleWslPath(distroName, linuxHomePath),
-  };
+  return fallbackHome;
 }
 
 export function toAccessibleWslPath(distroName: string, linuxPath: string): string {

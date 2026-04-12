@@ -266,14 +266,45 @@ function toModelForwardingRules(
 // --- Service Implementation ---
 
 export class GoogleAPIService {
+  private static cachedProxyAgent: ProxyAgent | null = null;
+  private static cachedProxyUrl: string | null = null;
+
+  private static clearCachedProxyAgent() {
+    const agent = this.cachedProxyAgent;
+    this.cachedProxyAgent = null;
+    this.cachedProxyUrl = null;
+
+    if (!agent) {
+      return;
+    }
+
+    void agent.close().catch((error) => {
+      logger.warn('[GoogleAPIService] Failed to close cached proxy agent', error);
+    });
+  }
+
   private static getFetchOptions() {
     try {
-      const config = ConfigManager.loadConfig();
-      if (config.proxy?.upstream_proxy?.enabled && config.proxy.upstream_proxy.url) {
-        return {
-          dispatcher: new ProxyAgent(config.proxy.upstream_proxy.url),
-        };
+      const config = ConfigManager.getCachedConfigOrLoad();
+      const proxyUrl =
+        config.proxy?.upstream_proxy?.enabled && config.proxy.upstream_proxy.url
+          ? config.proxy.upstream_proxy.url
+          : null;
+
+      if (!proxyUrl) {
+        this.clearCachedProxyAgent();
+        return {};
       }
+
+      if (!this.cachedProxyAgent || this.cachedProxyUrl !== proxyUrl) {
+        this.clearCachedProxyAgent();
+        this.cachedProxyAgent = new ProxyAgent(proxyUrl);
+        this.cachedProxyUrl = proxyUrl;
+      }
+
+      return {
+        dispatcher: this.cachedProxyAgent,
+      };
     } catch (e) {
       // Fallback or log if config load fails (shouldn't happen usually)
       logger.warn('[GoogleAPIService] Failed to load proxy config', e);

@@ -115,6 +115,10 @@ export class ConfigManager {
     return this.cachedConfig;
   }
 
+  static getCachedConfigOrLoad(): AppConfig {
+    return this.cachedConfig ?? this.loadConfig();
+  }
+
   static async saveConfig(config: AppConfig): Promise<void> {
     const configPath = this.getConfigPath();
     const normalizedConfig = this.normalizeConfig(config);

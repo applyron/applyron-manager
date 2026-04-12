@@ -80,7 +80,10 @@ function resolveLatestBuildDirectory(): string {
     .filter((entryPath) => {
       try {
         const appInfo = parseElectronApp(entryPath);
-        return fs.existsSync(appInfo.executable) && fs.existsSync(appInfo.main);
+        const requiredPaths = appInfo.asar
+          ? [appInfo.executable, path.join(appInfo.resourcesDir, 'app.asar')]
+          : [appInfo.executable, appInfo.main];
+        return requiredPaths.every((requiredPath) => fs.existsSync(requiredPath));
       } catch {
         return false;
       }
@@ -217,9 +220,12 @@ export async function launchPackagedElectronAppWithOptions({
       ...env,
     }).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   );
+  // Playwright needs the packaged app's resolved main entry even for asar builds
+  // so it can attach to Electron reliably during startup.
+  const launchArgs = [appInfo.main, ...args];
 
   const app = await electron.launch({
-    args: [appInfo.main, ...args],
+    args: launchArgs,
     executablePath: appInfo.executable,
     env: launchEnv,
   });

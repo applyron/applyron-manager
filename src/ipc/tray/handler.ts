@@ -293,7 +293,7 @@ export function updateTrayMenu(account?: CloudAccount | null, language?: string)
 
   void (async () => {
     const texts = getTrayTexts(lastLanguage);
-    const targetId = ConfigManager.loadConfig().managed_ide_target;
+    const targetId = ConfigManager.getCachedConfigOrLoad().managed_ide_target;
     const bodyTemplate =
       targetId === 'vscode-codex'
         ? await buildCodexMenu(texts)

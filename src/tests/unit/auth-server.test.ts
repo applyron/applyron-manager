@@ -4,6 +4,7 @@ import { ServiceHealthRegistry } from '../../services/ServiceHealthRegistry';
 
 vi.mock('../../ipc/config/manager', () => ({
   ConfigManager: {
+    getCachedConfigOrLoad: vi.fn(() => ({ language: 'en' })),
     loadConfig: vi.fn(() => ({ language: 'en' })),
   },
 }));

@@ -14,7 +14,7 @@ import {
   resolveInstallNoticeLanguage,
 } from './utils/installNotice';
 import { CloudAccountRepo } from './ipc/database/cloudHandler';
-import { initDatabase } from './ipc/database/handler';
+import { initDatabase, shutdownDatabase } from './ipc/database/handler';
 import { cloudMonitorService } from './services/CloudMonitorService';
 import { CodexAutoSwitchService } from './services/CodexAutoSwitchService';
 import { CodexMonitorService } from './services/CodexMonitorService';
@@ -43,6 +43,7 @@ import {
   runCriticalStartupPhase,
   StartupFatalError,
 } from './main/startupLifecycle';
+import { shouldDisableHardwareAcceleration } from './main/hardwareAcceleration';
 import { prepareStartupDesktopIntegration } from './main/startupDesktopIntegration';
 import {
   ensureVisibleWindowsUninstallLauncher,
@@ -102,7 +103,15 @@ ipcMain.on(IPC_CHANNELS.CHANGE_LANGUAGE, (event, lang) => {
   logger.info(`IPC: Received CHANGE_LANGUAGE: ${lang}`);
   setTrayLanguage(lang);
 });
-app.disableHardwareAcceleration();
+
+if (
+  shouldDisableHardwareAcceleration({
+    disableGpuEnv: process.env.APPLYRON_DISABLE_GPU,
+    isPackagedE2E: isE2E,
+  })
+) {
+  app.disableHardwareAcceleration();
+}
 
 triggerWindowsUninstallFromLauncher({
   platform: process.platform,
@@ -220,6 +229,12 @@ function runShutdownCleanup() {
     CloudAccountRepo.shutdown();
   } catch (error) {
     logger.error('Failed to close cloud account database during shutdown cleanup', error);
+  }
+
+  try {
+    shutdownDatabase();
+  } catch (error) {
+    logger.error('Failed to close managed IDE database during shutdown cleanup', error);
   }
 
   if (backgroundServicesStartupHandle) {

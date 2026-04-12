@@ -113,12 +113,18 @@ class Logger {
   }
 
   private pruneLogs(now: number) {
-    while (this.recentLogs.length > 0 && now - this.recentLogs[0].timestamp > LOG_WINDOW_MS) {
-      this.recentLogs.shift();
+    const cutoffIndex = this.recentLogs.findIndex(
+      (entry) => now - entry.timestamp <= LOG_WINDOW_MS,
+    );
+
+    if (cutoffIndex === -1) {
+      this.recentLogs.length = 0;
+    } else if (cutoffIndex > 0) {
+      this.recentLogs.splice(0, cutoffIndex);
     }
 
     if (this.recentLogs.length > MAX_LOG_ENTRIES) {
-      this.recentLogs = this.recentLogs.slice(-MAX_LOG_ENTRIES);
+      this.recentLogs.splice(0, this.recentLogs.length - MAX_LOG_ENTRIES);
     }
   }
 

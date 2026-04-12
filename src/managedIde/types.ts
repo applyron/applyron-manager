@@ -1,6 +1,11 @@
 export type ManagedIdeTargetId = 'antigravity' | 'vscode-codex';
 export type CodexRuntimeId = 'windows-local' | 'wsl-remote';
 
+export interface CodexPendingRuntimeApply {
+  runtimeId: CodexRuntimeId;
+  recordId: string;
+}
+
 export interface ManagedIdeTargetCapabilities {
   accountStorageRead: boolean;
   quotaManagement: boolean;
@@ -111,6 +116,7 @@ export interface ManagedIdeCurrentStatus {
   activeRuntimeId: CodexRuntimeId | null;
   requiresRuntimeSelection: boolean;
   hasRuntimeMismatch: boolean;
+  pendingRuntimeApply: CodexPendingRuntimeApply | null;
   runtimes: ManagedIdeCodexRuntimeStatus[];
 }
 
@@ -172,6 +178,13 @@ export interface CodexRuntimeSyncResult {
   syncedAuthFile: boolean;
   syncedExtensionState: boolean;
   warnings: string[];
+}
+
+export interface CodexAccountActivationResult {
+  account: CodexAccountRecord;
+  appliedRuntimeId: CodexRuntimeId | null;
+  didRestartIde: boolean;
+  deferredUntilIdeRestart: boolean;
 }
 
 export type CodexImportRestoreStatus =

@@ -2,9 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { asc, eq, or } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { openDrizzleConnection } from '../ipc/database/dbConnection';
 import {
-  ensureCloudDatabaseInitialized,
+  getCloudDbConnection,
   isCloudStorageUnavailableError,
 } from '../ipc/database/cloudHandler';
 import { codexAccounts } from '../ipc/database/schema';
@@ -50,9 +49,29 @@ const codexAccountsFallbackPath = path.join(
 );
 
 function getDb() {
-  const dbPath = getCloudAccountsDbPath();
-  ensureCloudDatabaseInitialized(dbPath);
-  return openDrizzleConnection(dbPath, { readonly: false, fileMustExist: false });
+  return getCloudDbConnection();
+}
+
+let codexStoreWriteQueue: Promise<void> = Promise.resolve();
+let codexStoreWriteDepth = 0;
+
+function runSerializedCodexStoreWrite<T>(action: () => Promise<T>): Promise<T> {
+  const runAction = async () => {
+    codexStoreWriteDepth += 1;
+    try {
+      return await action();
+    } finally {
+      codexStoreWriteDepth -= 1;
+    }
+  };
+
+  if (codexStoreWriteDepth > 0) {
+    return runAction();
+  }
+
+  const result = codexStoreWriteQueue.catch(() => undefined).then(runAction);
+  codexStoreWriteQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 function ensureFallbackDirectoryExists() {
@@ -168,7 +187,7 @@ function normalizeStoredRows(rows: CodexAccountRow[]): PersistedCodexAccountRow[
   return sortRows(
     deduped.map((row) => ({
       ...row,
-      isActive: activeId && row.id === activeId ? 1 : 0,
+      isActive: activeId ? (row.id === activeId ? 1 : 0) : row.isActive,
     })),
   );
 }
@@ -209,6 +228,51 @@ function writeFallbackRows(rows: PersistedCodexAccountRow[]) {
     JSON.stringify(normalizeStoredRows(rows), null, 2),
     'utf8',
   );
+}
+
+function clearFallbackRows() {
+  if (!fs.existsSync(codexAccountsFallbackPath)) {
+    return;
+  }
+
+  fs.rmSync(codexAccountsFallbackPath, { force: true });
+}
+
+function reconcileFallbackRowsIntoDatabase(): void {
+  if (!fs.existsSync(codexAccountsFallbackPath)) {
+    return;
+  }
+
+  const fallbackRows = readFallbackRows();
+  const { orm } = getDb();
+  const mergedRows = normalizeStoredRows([
+    ...orm.select().from(codexAccounts).all(),
+    ...fallbackRows,
+  ]);
+
+  orm.transaction((tx) => {
+    tx.delete(codexAccounts).run();
+
+    if (mergedRows.length > 0) {
+      tx.insert(codexAccounts).values(mergedRows).run();
+    }
+  });
+
+  clearFallbackRows();
+}
+
+async function ensureFallbackRowsReconciled(): Promise<void> {
+  if (!fs.existsSync(codexAccountsFallbackPath)) {
+    return;
+  }
+
+  await runSerializedCodexStoreWrite(async () => {
+    if (!fs.existsSync(codexAccountsFallbackPath)) {
+      return;
+    }
+
+    reconcileFallbackRowsIntoDatabase();
+  });
 }
 
 function getNextSortOrderFromRows(rows: PersistedCodexAccountRow[]): number {
@@ -288,18 +352,15 @@ function mapRowToRecord(row: CodexAccountRow): CodexAccountRecord {
 }
 
 async function getNextSortOrder(): Promise<number> {
-  const { raw, orm } = getDb();
-  try {
-    const rows = normalizeStoredRows(
-      orm.select().from(codexAccounts).orderBy(asc(codexAccounts.sortOrder)).all(),
-    );
-    if (rows.length === 0) {
-      return 0;
-    }
-    return Math.max(...rows.map((row) => row.sortOrder)) + 1;
-  } finally {
-    raw.close();
+  await ensureFallbackRowsReconciled();
+  const { orm } = getDb();
+  const rows = normalizeStoredRows(
+    orm.select().from(codexAccounts).orderBy(asc(codexAccounts.sortOrder)).all(),
+  );
+  if (rows.length === 0) {
+    return 0;
   }
+  return Math.max(...rows.map((row) => row.sortOrder)) + 1;
 }
 
 export interface UpsertCodexAccountInput {
@@ -319,20 +380,17 @@ export class CodexAccountStore {
   static async listAccounts(): Promise<CodexAccountRecord[]> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const rows = normalizeStoredRows(
-            orm
-              .select()
-              .from(codexAccounts)
-              .orderBy(asc(codexAccounts.sortOrder), asc(codexAccounts.createdAt))
-              .all(),
-          );
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const rows = normalizeStoredRows(
+          orm
+            .select()
+            .from(codexAccounts)
+            .orderBy(asc(codexAccounts.sortOrder), asc(codexAccounts.createdAt))
+            .all(),
+        );
 
-          return rows.map(mapRowToRecord);
-        } finally {
-          raw.close();
-        }
+        return rows.map(mapRowToRecord);
       },
       async () => sortRows(readFallbackRows()).map(mapRowToRecord),
     );
@@ -341,13 +399,10 @@ export class CodexAccountStore {
   static async getAccount(id: string): Promise<CodexAccountRecord | null> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const row = orm.select().from(codexAccounts).where(eq(codexAccounts.id, id)).get();
-          return row ? mapRowToRecord(row) : null;
-        } finally {
-          raw.close();
-        }
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const row = orm.select().from(codexAccounts).where(eq(codexAccounts.id, id)).get();
+        return row ? mapRowToRecord(row) : null;
       },
       async () => {
         const row = readFallbackRows().find((item) => item.id === id);
@@ -363,18 +418,15 @@ export class CodexAccountStore {
   static async getByIdentityKey(identityKey: string): Promise<CodexAccountRecord | null> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const rows = orm
-            .select()
-            .from(codexAccounts)
-            .where(eq(codexAccounts.identityKey, identityKey))
-            .all();
-          const row = getExistingRowByIdentityKey(rows, identityKey);
-          return row ? mapRowToRecord(row) : null;
-        } finally {
-          raw.close();
-        }
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const rows = orm
+          .select()
+          .from(codexAccounts)
+          .where(eq(codexAccounts.identityKey, identityKey))
+          .all();
+        const row = getExistingRowByIdentityKey(rows, identityKey);
+        return row ? mapRowToRecord(row) : null;
       },
       async () => {
         const row = getExistingRowByIdentityKey(readFallbackRows(), identityKey);
@@ -386,16 +438,13 @@ export class CodexAccountStore {
   static async getActiveAccount(): Promise<CodexAccountRecord | null> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const row =
-            normalizeStoredRows(orm.select().from(codexAccounts).all()).find(
-              (candidate) => candidate.isActive === 1,
-            ) ?? null;
-          return row ? mapRowToRecord(row) : null;
-        } finally {
-          raw.close();
-        }
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const row =
+          normalizeStoredRows(orm.select().from(codexAccounts).all()).find(
+            (candidate) => candidate.isActive === 1,
+          ) ?? null;
+        return row ? mapRowToRecord(row) : null;
       },
       async () => {
         const row = readFallbackRows().find((item) => item.isActive === 1);
@@ -410,25 +459,22 @@ export class CodexAccountStore {
   ): Promise<CodexAuthFile | null> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const row = orm
-            .select({ encryptedAuthJson: codexAccounts.encryptedAuthJson })
-            .from(codexAccounts)
-            .where(eq(codexAccounts.id, id))
-            .get();
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const row = orm
+          .select({ encryptedAuthJson: codexAccounts.encryptedAuthJson })
+          .from(codexAccounts)
+          .where(eq(codexAccounts.id, id))
+          .get();
 
-          if (!row?.encryptedAuthJson) {
-            return null;
-          }
-
-          const decrypted = await decrypt(row.encryptedAuthJson, {
-            suppressAuthTagMismatchLog: options?.suppressExpectedSecurityLogs,
-          });
-          return JSON.parse(decrypted) as CodexAuthFile;
-        } finally {
-          raw.close();
+        if (!row?.encryptedAuthJson) {
+          return null;
         }
+
+        const decrypted = await decrypt(row.encryptedAuthJson, {
+          suppressAuthTagMismatchLog: options?.suppressExpectedSecurityLogs,
+        });
+        return JSON.parse(decrypted) as CodexAuthFile;
       },
       async () => {
         const row = readFallbackRows().find((item) => item.id === id);
@@ -445,141 +491,151 @@ export class CodexAccountStore {
   }
 
   static async upsertAccount(input: UpsertCodexAccountInput): Promise<CodexAccountRecord> {
-    const identityKey = getCodexIdentityKey({
-      accountId: input.accountId,
-      workspace: input.workspace,
-    });
-    const existingByIdentity = await this.getByIdentityKey(identityKey);
-    const existingById =
-      input.existingId && (!existingByIdentity || existingByIdentity.id !== input.existingId)
-        ? await this.getAccount(input.existingId)
-        : null;
-    const existing =
-      existingByIdentity ??
-      (existingById && existingById.accountId === input.accountId ? existingById : null);
-    const encryptedAuthJson = await encrypt(JSON.stringify(input.authFile));
-    const now = Date.now();
-    const id = existing?.id ?? uuidv4();
-    const existingHydrationState = existing ? await this.getHydrationState(existing.id) : 'live';
-    const hydrationState = input.hydrationState ?? existingHydrationState ?? 'live';
+    return runSerializedCodexStoreWrite(async () => {
+      const identityKey = getCodexIdentityKey({
+        accountId: input.accountId,
+        workspace: input.workspace,
+      });
+      const encryptedAuthJson = await encrypt(JSON.stringify(input.authFile));
+      const now = Date.now();
 
-    return runWithFallback(
-      async () => {
-        const sortOrder = existing?.sortOrder ?? (await getNextSortOrder());
-        const { raw, orm } = getDb();
+      return runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
+          const existingRows = normalizeStoredRows(
+            orm
+              .select()
+              .from(codexAccounts)
+              .where(
+                input.existingId
+                  ? or(
+                      eq(codexAccounts.identityKey, identityKey),
+                      eq(codexAccounts.id, input.existingId),
+                    )
+                  : eq(codexAccounts.identityKey, identityKey),
+              )
+              .all(),
+          );
+          const existingRow =
+            (input.existingId
+              ? existingRows.find((row) => row.id === input.existingId)
+              : null) ?? getExistingRowByIdentityKey(existingRows, identityKey);
+          const id = existingRow?.id ?? input.existingId ?? uuidv4();
+          const sortOrder = existingRow?.sortOrder ?? (await getNextSortOrder());
+          const hydrationState =
+            input.hydrationState ?? existingRow?.hydrationState ?? 'live';
+          const payload: PersistedCodexAccountRow = {
+            id,
+            email: input.email,
+            label: input.label ?? existingRow?.label ?? null,
+            accountId: input.accountId,
+            authMode: input.authMode,
+            hydrationState,
+            workspaceId: input.workspace?.id ?? null,
+            workspaceTitle: input.workspace?.title ?? null,
+            workspaceRole: input.workspace?.role ?? null,
+            workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
+            identityKey,
+            encryptedAuthJson,
+            snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
+            isActive: input.makeActive ? 1 : existingRow?.isActive ?? 0,
+            sortOrder,
+            createdAt: existingRow?.createdAt ?? now,
+            updatedAt: now,
+            lastRefreshedAt: input.snapshot?.lastUpdatedAt ?? existingRow?.lastRefreshedAt ?? null,
+          };
 
-        try {
           orm.transaction((tx) => {
             if (input.makeActive) {
               tx.update(codexAccounts).set({ isActive: 0, updatedAt: now }).run();
             }
 
-            const payload = {
-              id,
-              email: input.email,
-              label: input.label ?? existing?.label ?? null,
-              accountId: input.accountId,
-              authMode: input.authMode,
-              hydrationState,
-              workspaceId: input.workspace?.id ?? null,
-              workspaceTitle: input.workspace?.title ?? null,
-              workspaceRole: input.workspace?.role ?? null,
-              workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
-              identityKey,
-              encryptedAuthJson,
-              snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
-              isActive: input.makeActive ? 1 : existing?.isActive ? 1 : 0,
-              sortOrder,
-              createdAt: existing?.createdAt ?? now,
-              updatedAt: now,
-              lastRefreshedAt: input.snapshot?.lastUpdatedAt ?? existing?.lastRefreshedAt ?? null,
-            };
-
-            const existingRows = tx
+            const duplicateRows = tx
               .select()
               .from(codexAccounts)
               .where(or(eq(codexAccounts.identityKey, identityKey), eq(codexAccounts.id, id)))
               .all();
-            const existingRow =
-              existingRows.find((row) => row.id === id) ??
-              getExistingRowByIdentityKey(existingRows, identityKey);
 
-            for (const duplicateRow of existingRows) {
-              if (duplicateRow.id === existingRow?.id) {
+            for (const duplicateRow of duplicateRows) {
+              if (duplicateRow.id === existingRow?.id || duplicateRow.id === id) {
                 continue;
               }
 
               tx.delete(codexAccounts).where(eq(codexAccounts.id, duplicateRow.id)).run();
             }
 
-            if (existingRow) {
-              tx.update(codexAccounts)
-                .set(payload)
-                .where(eq(codexAccounts.id, existingRow.id))
-                .run();
+            const targetId = existingRow?.id ?? id;
+            const hasExistingTarget = duplicateRows.some((row) => row.id === targetId);
+            if (hasExistingTarget) {
+              tx.update(codexAccounts).set(payload).where(eq(codexAccounts.id, targetId)).run();
             } else {
               tx.insert(codexAccounts).values(payload).run();
             }
           });
 
-          const account = await this.getAccount(id);
+          const account = orm.select().from(codexAccounts).where(eq(codexAccounts.id, id)).get();
           if (!account) {
             throw new Error('Failed to load saved Codex account');
           }
-          return account;
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const rows = readFallbackRows();
-        const existingRow =
-          rows.find((row) => row.id === id) ?? getExistingRowByIdentityKey(rows, identityKey);
-        const sortOrder = existingRow?.sortOrder ?? getNextSortOrderFromRows(rows);
 
-        if (input.makeActive) {
-          for (const row of rows) {
-            row.isActive = 0;
-            row.updatedAt = now;
+          return mapRowToRecord(account);
+        },
+        async () => {
+          const rows = readFallbackRows();
+          const existingRow =
+            rows.find((row) => row.id === input.existingId) ??
+            getExistingRowByIdentityKey(rows, identityKey);
+          const id = existingRow?.id ?? input.existingId ?? uuidv4();
+          const hydrationState =
+            input.hydrationState ?? existingRow?.hydrationState ?? 'live';
+          const sortOrder = existingRow?.sortOrder ?? getNextSortOrderFromRows(rows);
+
+          if (input.makeActive) {
+            for (const row of rows) {
+              row.isActive = 0;
+              row.updatedAt = now;
+            }
           }
-        }
 
-        const nextRow: PersistedCodexAccountRow = {
-          id,
-          email: input.email,
-          label: input.label ?? existingRow?.label ?? null,
-          accountId: input.accountId,
-          authMode: input.authMode,
-          hydrationState,
-          workspaceId: input.workspace?.id ?? null,
-          workspaceTitle: input.workspace?.title ?? null,
-          workspaceRole: input.workspace?.role ?? null,
-          workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
-          identityKey,
-          encryptedAuthJson,
-          snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
-          isActive: input.makeActive ? 1 : existingRow?.isActive ? 1 : 0,
-          sortOrder,
-          createdAt: existingRow?.createdAt ?? now,
-          updatedAt: now,
-          lastRefreshedAt: input.snapshot?.lastUpdatedAt ?? existingRow?.lastRefreshedAt ?? null,
-        };
+          const nextRow: PersistedCodexAccountRow = {
+            id,
+            email: input.email,
+            label: input.label ?? existingRow?.label ?? null,
+            accountId: input.accountId,
+            authMode: input.authMode,
+            hydrationState,
+            workspaceId: input.workspace?.id ?? null,
+            workspaceTitle: input.workspace?.title ?? null,
+            workspaceRole: input.workspace?.role ?? null,
+            workspaceIsDefault: input.workspace?.isDefault ? 1 : 0,
+            identityKey,
+            encryptedAuthJson,
+            snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
+            isActive: input.makeActive ? 1 : existingRow?.isActive ?? 0,
+            sortOrder,
+            createdAt: existingRow?.createdAt ?? now,
+            updatedAt: now,
+            lastRefreshedAt: input.snapshot?.lastUpdatedAt ?? existingRow?.lastRefreshedAt ?? null,
+          };
 
-        const nextRows = existingRow
-          ? rows.map((row) => (getRowIdentityKey(row) === identityKey ? nextRow : row))
-          : [...rows, nextRow];
+          const nextRows = rows
+            .filter((row) => row.id !== id && getRowIdentityKey(row) !== identityKey)
+            .concat(nextRow);
 
-        writeFallbackRows(nextRows);
-        return mapRowToRecord(nextRow);
-      },
-    );
+          writeFallbackRows(nextRows);
+          return mapRowToRecord(nextRow);
+        },
+      );
+    });
   }
 
   static async updateSnapshot(id: string, snapshot: CodexAccountSnapshot | null): Promise<void> {
-    return runWithFallback(
-      async () => {
-        const { raw, orm } = getDb();
-        try {
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
           orm
             .update(codexAccounts)
             .set({
@@ -589,44 +645,39 @@ export class CodexAccountStore {
             })
             .where(eq(codexAccounts.id, id))
             .run();
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const now = Date.now();
-        const nextRows = readFallbackRows().map((row) =>
-          row.id === id
-            ? {
-                ...row,
-                snapshotJson: snapshot ? JSON.stringify(snapshot) : null,
-                lastRefreshedAt: snapshot?.lastUpdatedAt ?? null,
-                updatedAt: now,
-              }
-            : row,
-        );
-        writeFallbackRows(nextRows);
-      },
+        },
+        async () => {
+          const now = Date.now();
+          const nextRows = readFallbackRows().map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  snapshotJson: snapshot ? JSON.stringify(snapshot) : null,
+                  lastRefreshedAt: snapshot?.lastUpdatedAt ?? null,
+                  updatedAt: now,
+                }
+              : row,
+          );
+          writeFallbackRows(nextRows);
+        },
+      ),
     );
   }
 
   static async getHydrationState(id: string): Promise<CodexAccountHydrationState | null> {
     return runWithFallback(
       async () => {
-        const { raw, orm } = getDb();
-        try {
-          const row = orm
-            .select({ hydrationState: codexAccounts.hydrationState })
-            .from(codexAccounts)
-            .where(eq(codexAccounts.id, id))
-            .get();
-          if (!row?.hydrationState) {
-            return null;
-          }
-          return row.hydrationState === 'needs_import_restore' ? 'needs_import_restore' : 'live';
-        } finally {
-          raw.close();
+        await ensureFallbackRowsReconciled();
+        const { orm } = getDb();
+        const row = orm
+          .select({ hydrationState: codexAccounts.hydrationState })
+          .from(codexAccounts)
+          .where(eq(codexAccounts.id, id))
+          .get();
+        if (!row?.hydrationState) {
+          return null;
         }
+        return row.hydrationState === 'needs_import_restore' ? 'needs_import_restore' : 'live';
       },
       async () => {
         const row = readFallbackRows().find((item) => item.id === id);
@@ -642,10 +693,11 @@ export class CodexAccountStore {
     id: string,
     hydrationState: CodexAccountHydrationState,
   ): Promise<void> {
-    return runWithFallback(
-      async () => {
-        const { raw, orm } = getDb();
-        try {
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
           orm
             .update(codexAccounts)
             .set({
@@ -654,23 +706,21 @@ export class CodexAccountStore {
             })
             .where(eq(codexAccounts.id, id))
             .run();
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const now = Date.now();
-        const nextRows = readFallbackRows().map((row) =>
-          row.id === id
-            ? {
-                ...row,
-                hydrationState,
-                updatedAt: now,
-              }
-            : row,
-        );
-        writeFallbackRows(nextRows);
-      },
+        },
+        async () => {
+          const now = Date.now();
+          const nextRows = readFallbackRows().map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  hydrationState,
+                  updatedAt: now,
+                }
+              : row,
+          );
+          writeFallbackRows(nextRows);
+        },
+      ),
     );
   }
 
@@ -678,58 +728,58 @@ export class CodexAccountStore {
     id: string,
     updates: Partial<Pick<CodexAccountRecord, 'email' | 'label' | 'authMode'>>,
   ): Promise<void> {
-    return runWithFallback(
-      async () => {
-        const payload: Record<string, string | number | null> = {
-          updatedAt: Date.now(),
-        };
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          const payload: Record<string, string | number | null> = {
+            updatedAt: Date.now(),
+          };
 
-        if ('email' in updates) {
-          payload.email = updates.email ?? null;
-        }
-
-        if ('label' in updates) {
-          payload.label = updates.label ?? null;
-        }
-
-        if ('authMode' in updates) {
-          payload.authMode = updates.authMode ?? null;
-        }
-
-        const { raw, orm } = getDb();
-        try {
-          orm.update(codexAccounts).set(payload).where(eq(codexAccounts.id, id)).run();
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const now = Date.now();
-        const nextRows = readFallbackRows().map((row) => {
-          if (row.id !== id) {
-            return row;
+          if ('email' in updates) {
+            payload.email = updates.email ?? null;
           }
 
-          return {
-            ...row,
-            email: 'email' in updates ? (updates.email ?? null) : row.email,
-            label: 'label' in updates ? (updates.label ?? null) : row.label,
-            authMode: 'authMode' in updates ? (updates.authMode ?? null) : row.authMode,
-            updatedAt: now,
-          };
-        });
+          if ('label' in updates) {
+            payload.label = updates.label ?? null;
+          }
 
-        writeFallbackRows(nextRows);
-      },
+          if ('authMode' in updates) {
+            payload.authMode = updates.authMode ?? null;
+          }
+
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
+          orm.update(codexAccounts).set(payload).where(eq(codexAccounts.id, id)).run();
+        },
+        async () => {
+          const now = Date.now();
+          const nextRows = readFallbackRows().map((row) => {
+            if (row.id !== id) {
+              return row;
+            }
+
+            return {
+              ...row,
+              email: 'email' in updates ? (updates.email ?? null) : row.email,
+              label: 'label' in updates ? (updates.label ?? null) : row.label,
+              authMode: 'authMode' in updates ? (updates.authMode ?? null) : row.authMode,
+              updatedAt: now,
+            };
+          });
+
+          writeFallbackRows(nextRows);
+        },
+      ),
     );
   }
 
   static async setActive(id: string): Promise<void> {
-    return runWithFallback(
-      async () => {
-        const { raw, orm } = getDb();
-        const now = Date.now();
-        try {
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
+          const now = Date.now();
           orm.transaction((tx) => {
             tx.update(codexAccounts).set({ isActive: 0, updatedAt: now }).run();
             tx.update(codexAccounts)
@@ -737,49 +787,57 @@ export class CodexAccountStore {
               .where(eq(codexAccounts.id, id))
               .run();
           });
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const now = Date.now();
-        const nextRows = readFallbackRows().map((row) => ({
-          ...row,
-          isActive: row.id === id ? 1 : 0,
-          updatedAt: now,
-        }));
-        writeFallbackRows(nextRows);
-      },
+        },
+        async () => {
+          const now = Date.now();
+          const nextRows = readFallbackRows().map((row) => ({
+            ...row,
+            isActive: row.id === id ? 1 : 0,
+            updatedAt: now,
+          }));
+          writeFallbackRows(nextRows);
+        },
+      ),
     );
   }
 
   static async removeAccount(id: string): Promise<void> {
-    const active = await this.getActiveAccount();
-    if (active?.id === id) {
-      throw new Error('ACTIVE_CODEX_ACCOUNT_DELETE_BLOCKED');
-    }
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
+          orm.transaction((tx) => {
+            const activeRow =
+              normalizeStoredRows(tx.select().from(codexAccounts).all()).find(
+                (candidate) => candidate.isActive === 1,
+              ) ?? null;
+            if (activeRow?.id === id) {
+              throw new Error('ACTIVE_CODEX_ACCOUNT_DELETE_BLOCKED');
+            }
 
-    return runWithFallback(
-      async () => {
-        const { raw, orm } = getDb();
-        try {
-          orm.delete(codexAccounts).where(eq(codexAccounts.id, id)).run();
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const nextRows = readFallbackRows().filter((row) => row.id !== id);
-        writeFallbackRows(nextRows);
-      },
+            tx.delete(codexAccounts).where(eq(codexAccounts.id, id)).run();
+          });
+        },
+        async () => {
+          const rows = readFallbackRows();
+          const activeRow = rows.find((row) => row.isActive === 1) ?? null;
+          if (activeRow?.id === id) {
+            throw new Error('ACTIVE_CODEX_ACCOUNT_DELETE_BLOCKED');
+          }
+
+          writeFallbackRows(rows.filter((row) => row.id !== id));
+        },
+      ),
     );
   }
 
   static async replaceAuthFile(id: string, authFile: CodexAuthFile): Promise<void> {
-    return runWithFallback(
-      async () => {
-        const { raw, orm } = getDb();
-        try {
+    return runSerializedCodexStoreWrite(() =>
+      runWithFallback(
+        async () => {
+          await ensureFallbackRowsReconciled();
+          const { orm } = getDb();
           orm
             .update(codexAccounts)
             .set({
@@ -788,25 +846,23 @@ export class CodexAccountStore {
             })
             .where(eq(codexAccounts.id, id))
             .run();
-        } finally {
-          raw.close();
-        }
-      },
-      async () => {
-        const encryptedAuthJson = await encrypt(JSON.stringify(authFile));
-        const now = Date.now();
-        const nextRows = readFallbackRows().map((row) =>
-          row.id === id
-            ? {
-                ...row,
-                encryptedAuthJson,
-                updatedAt: now,
-              }
-            : row,
-        );
+        },
+        async () => {
+          const encryptedAuthJson = await encrypt(JSON.stringify(authFile));
+          const now = Date.now();
+          const nextRows = readFallbackRows().map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  encryptedAuthJson,
+                  updatedAt: now,
+                }
+              : row,
+          );
 
-        writeFallbackRows(nextRows);
-      },
+          writeFallbackRows(nextRows);
+        },
+      ),
     );
   }
 }

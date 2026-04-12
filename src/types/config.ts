@@ -47,11 +47,28 @@ export const ProxyConfigSchema = z.object({
   upstream_proxy: UpstreamProxyConfigSchema,
 });
 
+const CodexPendingRuntimeApplySchema = z
+  .object({
+    runtimeId: z.enum(['windows-local', 'wsl-remote']),
+    recordId: z.string().min(1).optional(),
+  })
+  .transform((value) =>
+    value.recordId
+      ? {
+          runtimeId: value.runtimeId,
+          recordId: value.recordId,
+        }
+      : null,
+  )
+  .nullable()
+  .default(null);
+
 export const AppConfigSchema = z.object({
   language: z.string(),
   theme: z.string(),
   managed_ide_target: z.enum(['antigravity', 'vscode-codex']).default('antigravity'),
   codex_runtime_override: z.enum(['windows-local', 'wsl-remote']).nullable().default(null),
+  codex_pending_runtime_apply: CodexPendingRuntimeApplySchema,
   auto_startup: z.boolean(),
   default_export_path: z.string().nullable().optional(), // Export path
   model_visibility: z.record(z.string(), z.boolean()).default({}), // Model visibility preferences
@@ -70,6 +87,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   theme: 'system',
   managed_ide_target: 'antigravity',
   codex_runtime_override: null,
+  codex_pending_runtime_apply: null,
   auto_startup: false,
   default_export_path: null,
   model_visibility: {}, // Model visibility preferences

@@ -1,6 +1,7 @@
 import { ConfigManager } from '../ipc/config/manager';
 import { getManagedIdeTarget, getVisibleManagedIdeTargets } from './registry';
 import type {
+  CodexAccountActivationResult,
   CodexAccountRecord,
   CodexImportRestoreResult,
   CodexRuntimeSyncResult,
@@ -55,13 +56,14 @@ async function createAntigravityStatus(): Promise<ManagedIdeCurrentStatus> {
     activeRuntimeId: null,
     requiresRuntimeSelection: false,
     hasRuntimeMismatch: false,
+    pendingRuntimeApply: null,
     runtimes: [],
   };
 }
 
 export class ManagedIdeService {
   static getCurrentTargetId(): ManagedIdeTargetId {
-    return ConfigManager.loadConfig().managed_ide_target;
+    return ConfigManager.getCachedConfigOrLoad().managed_ide_target;
   }
 
   static async listTargets(): Promise<ManagedIdeRuntimeTarget[]> {
@@ -137,16 +139,23 @@ export class ManagedIdeService {
     return vscodeCodexAdapter.refreshAllAccounts();
   }
 
-  static async activateCodexAccount(id: string): Promise<CodexAccountRecord> {
-    const account = await vscodeCodexAdapter.activateAccount(id);
-    const config = ConfigManager.loadConfig();
+  static async activateCodexAccount(id: string): Promise<CodexAccountActivationResult> {
+    const activation = await vscodeCodexAdapter.activateAccount(id);
+    const config = ConfigManager.getCachedConfigOrLoad();
     if (config.managed_ide_target !== 'vscode-codex') {
       await ConfigManager.saveConfig({
         ...config,
         managed_ide_target: 'vscode-codex',
       });
     }
-    return account;
+    return activation;
+  }
+
+  static async tryAutoSwitchCodexAccount(
+    id: string,
+    expectedActiveAccountId: string,
+  ): Promise<boolean> {
+    return vscodeCodexAdapter.tryAutoSwitchAccount(id, expectedActiveAccountId);
   }
 
   static async restoreImportedCodexAccount(id: string | null): Promise<CodexImportRestoreResult> {

@@ -60,6 +60,7 @@ describe('Logger Utilities', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    (logger as unknown as { recentLogs: Array<{ timestamp: number }> }).recentLogs = [];
   });
 
   afterAll(() => {
@@ -116,5 +117,58 @@ describe('Logger Utilities', () => {
     expect(content).not.toContain('super-secret');
     expect(content).not.toContain('sk-raw-secret');
     expect(content).not.toContain('client-secret-value');
+  });
+
+  it('prunes expired log entries in a single batch', () => {
+    const loggerWithInternals = logger as unknown as {
+      recentLogs: Array<{ timestamp: number; level: string; message: string; formatted: string }>;
+      pruneLogs: (now: number) => void;
+    };
+
+    loggerWithInternals.recentLogs = [
+      {
+        timestamp: 0,
+        level: 'info',
+        message: 'old-1',
+        formatted: 'old-1',
+      },
+      {
+        timestamp: 1000,
+        level: 'info',
+        message: 'old-2',
+        formatted: 'old-2',
+      },
+      {
+        timestamp: 29_500,
+        level: 'info',
+        message: 'fresh',
+        formatted: 'fresh',
+      },
+    ];
+
+    loggerWithInternals.pruneLogs(31_500);
+
+    expect(loggerWithInternals.recentLogs).toHaveLength(1);
+    expect(loggerWithInternals.recentLogs[0]?.message).toBe('fresh');
+  });
+
+  it('keeps only the newest 200 in-memory log entries', () => {
+    const loggerWithInternals = logger as unknown as {
+      recentLogs: Array<{ timestamp: number; level: string; message: string; formatted: string }>;
+      pruneLogs: (now: number) => void;
+    };
+
+    loggerWithInternals.recentLogs = Array.from({ length: 205 }, (_, index) => ({
+      timestamp: index,
+      level: 'info',
+      message: `entry-${index}`,
+      formatted: `entry-${index}`,
+    }));
+
+    loggerWithInternals.pruneLogs(205);
+
+    expect(loggerWithInternals.recentLogs).toHaveLength(200);
+    expect(loggerWithInternals.recentLogs[0]?.message).toBe('entry-5');
+    expect(loggerWithInternals.recentLogs.at(-1)?.message).toBe('entry-204');
   });
 });

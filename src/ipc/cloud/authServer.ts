@@ -34,7 +34,10 @@ const OAUTH_PAGE_TEXTS: Record<string, OAuthPageText> = {
 };
 
 function resolveOAuthPageText(): OAuthPageText {
-  const language = normalizeAppLanguage(ConfigManager.loadConfig().language, FALLBACK_APP_LANGUAGE);
+  const language = normalizeAppLanguage(
+    ConfigManager.getCachedConfigOrLoad().language,
+    FALLBACK_APP_LANGUAGE,
+  );
   return OAUTH_PAGE_TEXTS[language];
 }
 

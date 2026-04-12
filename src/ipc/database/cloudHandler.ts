@@ -43,15 +43,8 @@ interface CloudDbOwnerConnection {
 }
 
 interface CloudDbScopedConnection {
-  raw: {
-    close: () => void;
-  };
   orm: BetterSQLite3Database<typeof drizzleSchema>;
 }
-
-const NOOP_DB_CLOSE = {
-  close: () => undefined,
-} satisfies CloudDbScopedConnection['raw'];
 
 let cloudDbOwnerConnection: CloudDbOwnerConnection | null = null;
 
@@ -660,9 +653,12 @@ function getCloudDb(): CloudDbScopedConnection {
   }
 
   return {
-    raw: NOOP_DB_CLOSE,
     orm: cloudDbOwnerConnection.orm,
   };
+}
+
+export function getCloudDbConnection(): CloudDbScopedConnection {
+  return getCloudDb();
 }
 
 function closeCloudDbOwnerConnection(): void {
@@ -956,47 +952,43 @@ export class CloudAccountRepo {
   }
 
   static async addAccount(account: CloudAccount): Promise<void> {
-    const { raw, orm } = getCloudDb();
-    try {
-      const tokenEncrypted = await encrypt(JSON.stringify(account.token));
-      const quotaEncrypted = account.quota ? await encrypt(JSON.stringify(account.quota)) : null;
-      const values = {
-        id: account.id,
-        provider: account.provider,
-        email: account.email,
-        name: account.name ?? null,
-        avatarUrl: account.avatar_url ?? null,
-        tokenJson: tokenEncrypted,
-        quotaJson: quotaEncrypted,
-        deviceProfileJson: serializeDeviceProfile(account.device_profile),
-        deviceHistoryJson: serializeDeviceHistory(account.device_history),
-        createdAt: account.created_at,
-        lastUsed: account.last_used,
-        status: account.status || 'active',
-        isActive: account.is_active ? 1 : 0,
-      };
+    const { orm } = getCloudDb();
+    const tokenEncrypted = await encrypt(JSON.stringify(account.token));
+    const quotaEncrypted = account.quota ? await encrypt(JSON.stringify(account.quota)) : null;
+    const values = {
+      id: account.id,
+      provider: account.provider,
+      email: account.email,
+      name: account.name ?? null,
+      avatarUrl: account.avatar_url ?? null,
+      tokenJson: tokenEncrypted,
+      quotaJson: quotaEncrypted,
+      deviceProfileJson: serializeDeviceProfile(account.device_profile),
+      deviceHistoryJson: serializeDeviceHistory(account.device_history),
+      createdAt: account.created_at,
+      lastUsed: account.last_used,
+      status: account.status || 'active',
+      isActive: account.is_active ? 1 : 0,
+    };
 
-      orm.transaction((tx) => {
-        // If this account is being set to active, deactivate all others first
-        if (account.is_active) {
-          logger.info(
-            `[DEBUG] addAccount: Deactivating all other accounts because ${account.email} is active`,
-          );
-          const info = tx.update(accounts).set({ isActive: 0 }).run();
-          logger.info(`[DEBUG] addAccount: Deactivation changed ${info.changes} rows`);
-        }
-        tx.insert(accounts)
-          .values(values)
-          .onConflictDoUpdate({
-            target: accounts.id,
-            set: values,
-          })
-          .run();
-      });
-      logger.info(`Added/Updated cloud account: ${account.email}`);
-    } finally {
-      raw.close();
-    }
+    orm.transaction((tx) => {
+      // If this account is being set to active, deactivate all others first
+      if (account.is_active) {
+        logger.info(
+          `[DEBUG] addAccount: Deactivating all other accounts because ${account.email} is active`,
+        );
+        const info = tx.update(accounts).set({ isActive: 0 }).run();
+        logger.info(`[DEBUG] addAccount: Deactivation changed ${info.changes} rows`);
+      }
+      tx.insert(accounts)
+        .values(values)
+        .onConflictDoUpdate({
+          target: accounts.id,
+          set: values,
+        })
+        .run();
+    });
+    logger.info(`Added/Updated cloud account: ${account.email}`);
   }
 
   static async getAccounts(): Promise<CloudAccount[]> {
@@ -1010,7 +1002,7 @@ export class CloudAccountRepo {
       }
       throw error;
     }
-    const { raw, orm } = connection;
+    const { orm } = connection;
     const migrationStats = createMigrationStats();
 
     try {
@@ -1113,198 +1105,158 @@ export class CloudAccountRepo {
           logger.info('CloudAccountRepo migration summary', summary);
         }
       }
-      raw.close();
     }
   }
 
   static async getAccount(id: string): Promise<CloudAccount | undefined> {
-    const { raw, orm } = getCloudDb();
-
-    try {
-      const rows = orm.select().from(accounts).where(eq(accounts.id, id)).all();
-      const normalizedRow = rows[0];
-      if (!normalizedRow) {
-        return undefined;
-      }
-
-      const tokenResult = await decryptAndMigrateField(
-        orm,
-        normalizedRow.id,
-        'tokenJson',
-        normalizedRow.tokenJson,
-      );
-      const quotaResult = await decryptAndMigrateField(
-        orm,
-        normalizedRow.id,
-        'quotaJson',
-        normalizedRow.quotaJson,
-      );
-
-      if (!tokenResult.value) {
-        throw new Error(`Missing token data for account ${normalizedRow.id}`);
-      }
-
-      return {
-        id: normalizedRow.id,
-        provider: normalizedRow.provider as CloudAccount['provider'],
-        email: normalizedRow.email,
-        name: normalizedRow.name ?? undefined,
-        avatar_url: normalizedRow.avatarUrl ?? undefined,
-        token: JSON.parse(tokenResult.value),
-        quota: quotaResult.value ? JSON.parse(quotaResult.value) : undefined,
-        device_profile: parseDeviceProfileColumn(normalizedRow.deviceProfileJson),
-        device_history: parseDeviceHistoryColumn(normalizedRow.deviceHistoryJson),
-        created_at: normalizedRow.createdAt,
-        last_used: normalizedRow.lastUsed,
-        status: (normalizedRow.status as CloudAccount['status']) ?? undefined,
-        is_active: Boolean(normalizedRow.isActive),
-      };
-    } finally {
-      raw.close();
+    const { orm } = getCloudDb();
+    const rows = orm.select().from(accounts).where(eq(accounts.id, id)).all();
+    const normalizedRow = rows[0];
+    if (!normalizedRow) {
+      return undefined;
     }
+
+    const tokenResult = await decryptAndMigrateField(
+      orm,
+      normalizedRow.id,
+      'tokenJson',
+      normalizedRow.tokenJson,
+    );
+    const quotaResult = await decryptAndMigrateField(
+      orm,
+      normalizedRow.id,
+      'quotaJson',
+      normalizedRow.quotaJson,
+    );
+
+    if (!tokenResult.value) {
+      throw new Error(`Missing token data for account ${normalizedRow.id}`);
+    }
+
+    return {
+      id: normalizedRow.id,
+      provider: normalizedRow.provider as CloudAccount['provider'],
+      email: normalizedRow.email,
+      name: normalizedRow.name ?? undefined,
+      avatar_url: normalizedRow.avatarUrl ?? undefined,
+      token: JSON.parse(tokenResult.value),
+      quota: quotaResult.value ? JSON.parse(quotaResult.value) : undefined,
+      device_profile: parseDeviceProfileColumn(normalizedRow.deviceProfileJson),
+      device_history: parseDeviceHistoryColumn(normalizedRow.deviceHistoryJson),
+      created_at: normalizedRow.createdAt,
+      last_used: normalizedRow.lastUsed,
+      status: (normalizedRow.status as CloudAccount['status']) ?? undefined,
+      is_active: Boolean(normalizedRow.isActive),
+    };
   }
 
   static async removeAccount(id: string): Promise<void> {
-    const { raw, orm } = getCloudDb();
-    try {
-      orm.delete(accounts).where(eq(accounts.id, id)).run();
-      logger.info(`Removed cloud account: ${id}`);
-    } finally {
-      raw.close();
-    }
+    const { orm } = getCloudDb();
+    orm.delete(accounts).where(eq(accounts.id, id)).run();
+    logger.info(`Removed cloud account: ${id}`);
   }
 
   static async updateToken(id: string, token: any): Promise<void> {
-    const { raw, orm } = getCloudDb();
-
-    try {
-      const encrypted = await encrypt(JSON.stringify(token));
-      orm.update(accounts).set({ tokenJson: encrypted }).where(eq(accounts.id, id)).run();
-    } finally {
-      raw.close();
-    }
+    const { orm } = getCloudDb();
+    const encrypted = await encrypt(JSON.stringify(token));
+    orm.update(accounts).set({ tokenJson: encrypted }).where(eq(accounts.id, id)).run();
   }
 
   static async updateQuota(id: string, quota: any): Promise<void> {
-    const { raw, orm } = getCloudDb();
-
-    try {
-      const encrypted = await encrypt(JSON.stringify(quota));
-      orm.update(accounts).set({ quotaJson: encrypted }).where(eq(accounts.id, id)).run();
-    } finally {
-      raw.close();
-    }
+    const { orm } = getCloudDb();
+    const encrypted = await encrypt(JSON.stringify(quota));
+    orm.update(accounts).set({ quotaJson: encrypted }).where(eq(accounts.id, id)).run();
   }
 
   static updateLastUsed(id: string): void {
-    const { raw, orm } = getCloudDb();
-    try {
-      orm
-        .update(accounts)
-        .set({ lastUsed: Math.floor(Date.now() / 1000) })
-        .where(eq(accounts.id, id))
-        .run();
-    } finally {
-      raw.close();
-    }
+    const { orm } = getCloudDb();
+    orm
+      .update(accounts)
+      .set({ lastUsed: Math.floor(Date.now() / 1000) })
+      .where(eq(accounts.id, id))
+      .run();
   }
 
   static setDeviceBinding(id: string, profile: DeviceProfile, label: string): void {
-    const { raw, orm } = getCloudDb();
-    try {
-      const rows = orm
-        .select({
-          deviceProfileJson: accounts.deviceProfileJson,
-          deviceHistoryJson: accounts.deviceHistoryJson,
-        })
-        .from(accounts)
-        .where(eq(accounts.id, id))
-        .all();
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`Account not found: ${id}`);
-      }
-
-      const boundProfile = parseDeviceProfileColumn(row.deviceProfileJson);
-      if (boundProfile && areDeviceProfilesEqual(boundProfile, profile)) {
-        logger.info(
-          `Skipping duplicate device profile binding for account ${id} (bound profile match)`,
-        );
-        return;
-      }
-
-      const historyRaw = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
-      const currentVersion = historyRaw.find((version) => version.isCurrent);
-      const latestVersion = historyRaw.length > 0 ? historyRaw[historyRaw.length - 1] : undefined;
-      if (currentVersion && areDeviceProfilesEqual(currentVersion.profile, profile)) {
-        logger.info(
-          `Skipping duplicate device profile binding for account ${id} (history current match)`,
-        );
-        return;
-      }
-      if (
-        !currentVersion &&
-        latestVersion &&
-        areDeviceProfilesEqual(latestVersion.profile, profile)
-      ) {
-        logger.info(
-          `Skipping duplicate device profile binding for account ${id} (history latest match)`,
-        );
-        return;
-      }
-
-      const history = historyRaw.map((version) => ({
-        ...version,
-        isCurrent: false,
-      }));
-
-      history.push({
-        id: uuidv4(),
-        createdAt: Math.floor(Date.now() / 1000),
-        label,
-        profile,
-        isCurrent: true,
-      });
-
-      orm
-        .update(accounts)
-        .set({
-          deviceProfileJson: serializeDeviceProfile(profile),
-          deviceHistoryJson: serializeDeviceHistory(history),
-        })
-        .where(eq(accounts.id, id))
-        .run();
-    } finally {
-      raw.close();
+    const { orm } = getCloudDb();
+    const rows = orm
+      .select({
+        deviceProfileJson: accounts.deviceProfileJson,
+        deviceHistoryJson: accounts.deviceHistoryJson,
+      })
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .all();
+    const row = rows[0];
+    if (!row) {
+      throw new Error(`Account not found: ${id}`);
     }
+
+    const boundProfile = parseDeviceProfileColumn(row.deviceProfileJson);
+    if (boundProfile && areDeviceProfilesEqual(boundProfile, profile)) {
+      logger.info(`Skipping duplicate device profile binding for account ${id} (bound profile match)`);
+      return;
+    }
+
+    const historyRaw = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+    const currentVersion = historyRaw.find((version) => version.isCurrent);
+    const latestVersion = historyRaw.length > 0 ? historyRaw[historyRaw.length - 1] : undefined;
+    if (currentVersion && areDeviceProfilesEqual(currentVersion.profile, profile)) {
+      logger.info(
+        `Skipping duplicate device profile binding for account ${id} (history current match)`,
+      );
+      return;
+    }
+    if (!currentVersion && latestVersion && areDeviceProfilesEqual(latestVersion.profile, profile)) {
+      logger.info(`Skipping duplicate device profile binding for account ${id} (history latest match)`);
+      return;
+    }
+
+    const history = historyRaw.map((version) => ({
+      ...version,
+      isCurrent: false,
+    }));
+
+    history.push({
+      id: uuidv4(),
+      createdAt: Math.floor(Date.now() / 1000),
+      label,
+      profile,
+      isCurrent: true,
+    });
+
+    orm
+      .update(accounts)
+      .set({
+        deviceProfileJson: serializeDeviceProfile(profile),
+        deviceHistoryJson: serializeDeviceHistory(history),
+      })
+      .where(eq(accounts.id, id))
+      .run();
   }
 
   static getDeviceBinding(id: string): {
     profile?: DeviceProfile;
     history: DeviceProfileVersion[];
   } {
-    const { raw, orm } = getCloudDb();
-    try {
-      const rows = orm
-        .select({
-          deviceProfileJson: accounts.deviceProfileJson,
-          deviceHistoryJson: accounts.deviceHistoryJson,
-        })
-        .from(accounts)
-        .where(eq(accounts.id, id))
-        .all();
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`Account not found: ${id}`);
-      }
-
-      return {
-        profile: parseDeviceProfileColumn(row.deviceProfileJson),
-        history: parseDeviceHistoryColumn(row.deviceHistoryJson) || [],
-      };
-    } finally {
-      raw.close();
+    const { orm } = getCloudDb();
+    const rows = orm
+      .select({
+        deviceProfileJson: accounts.deviceProfileJson,
+        deviceHistoryJson: accounts.deviceHistoryJson,
+      })
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .all();
+    const row = rows[0];
+    if (!row) {
+      throw new Error(`Account not found: ${id}`);
     }
+
+    return {
+      profile: parseDeviceProfileColumn(row.deviceProfileJson),
+      history: parseDeviceHistoryColumn(row.deviceHistoryJson) || [],
+    };
   }
 
   static restoreDeviceVersion(
@@ -1312,61 +1264,57 @@ export class CloudAccountRepo {
     versionId: string,
     baseline: DeviceProfile | null,
   ): DeviceProfile {
-    const { raw, orm } = getCloudDb();
-    try {
-      const rows = orm
-        .select({
-          deviceProfileJson: accounts.deviceProfileJson,
-          deviceHistoryJson: accounts.deviceHistoryJson,
-        })
-        .from(accounts)
-        .where(eq(accounts.id, id))
-        .all();
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`Account not found: ${id}`);
-      }
-
-      const currentProfile = parseDeviceProfileColumn(row.deviceProfileJson);
-      const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
-
-      let targetProfile: DeviceProfile;
-      if (versionId === 'baseline') {
-        if (!baseline) {
-          throw new Error('Global original profile not found');
-        }
-        targetProfile = baseline;
-      } else if (versionId === 'current') {
-        if (!currentProfile) {
-          throw new Error('No currently bound profile');
-        }
-        targetProfile = currentProfile;
-      } else {
-        const targetVersion = history.find((version) => version.id === versionId);
-        if (!targetVersion) {
-          throw new Error('Device profile version not found');
-        }
-        targetProfile = targetVersion.profile;
-      }
-
-      const nextHistory = history.map((version) => ({
-        ...version,
-        isCurrent: version.id === versionId,
-      }));
-
-      orm
-        .update(accounts)
-        .set({
-          deviceProfileJson: serializeDeviceProfile(targetProfile),
-          deviceHistoryJson: serializeDeviceHistory(nextHistory),
-        })
-        .where(eq(accounts.id, id))
-        .run();
-
-      return targetProfile;
-    } finally {
-      raw.close();
+    const { orm } = getCloudDb();
+    const rows = orm
+      .select({
+        deviceProfileJson: accounts.deviceProfileJson,
+        deviceHistoryJson: accounts.deviceHistoryJson,
+      })
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .all();
+    const row = rows[0];
+    if (!row) {
+      throw new Error(`Account not found: ${id}`);
     }
+
+    const currentProfile = parseDeviceProfileColumn(row.deviceProfileJson);
+    const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+
+    let targetProfile: DeviceProfile;
+    if (versionId === 'baseline') {
+      if (!baseline) {
+        throw new Error('Global original profile not found');
+      }
+      targetProfile = baseline;
+    } else if (versionId === 'current') {
+      if (!currentProfile) {
+        throw new Error('No currently bound profile');
+      }
+      targetProfile = currentProfile;
+    } else {
+      const targetVersion = history.find((version) => version.id === versionId);
+      if (!targetVersion) {
+        throw new Error('Device profile version not found');
+      }
+      targetProfile = targetVersion.profile;
+    }
+
+    const nextHistory = history.map((version) => ({
+      ...version,
+      isCurrent: version.id === versionId,
+    }));
+
+    orm
+      .update(accounts)
+      .set({
+        deviceProfileJson: serializeDeviceProfile(targetProfile),
+        deviceHistoryJson: serializeDeviceHistory(nextHistory),
+      })
+      .where(eq(accounts.id, id))
+      .run();
+
+    return targetProfile;
   }
 
   static deleteDeviceVersion(id: string, versionId: string): void {
@@ -1374,50 +1322,41 @@ export class CloudAccountRepo {
       throw new Error('Original profile cannot be deleted');
     }
 
-    const { raw, orm } = getCloudDb();
-    try {
-      const rows = orm
-        .select({ deviceHistoryJson: accounts.deviceHistoryJson })
-        .from(accounts)
-        .where(eq(accounts.id, id))
-        .all();
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`Account not found: ${id}`);
-      }
-
-      const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
-      if (history.some((version) => version.id === versionId && version.isCurrent)) {
-        throw new Error('Currently bound profile cannot be deleted');
-      }
-
-      const nextHistory = history.filter((version) => version.id !== versionId);
-      if (nextHistory.length === history.length) {
-        throw new Error('Historical device profile not found');
-      }
-
-      orm
-        .update(accounts)
-        .set({ deviceHistoryJson: serializeDeviceHistory(nextHistory) })
-        .where(eq(accounts.id, id))
-        .run();
-    } finally {
-      raw.close();
+    const { orm } = getCloudDb();
+    const rows = orm
+      .select({ deviceHistoryJson: accounts.deviceHistoryJson })
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .all();
+    const row = rows[0];
+    if (!row) {
+      throw new Error(`Account not found: ${id}`);
     }
+
+    const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+    if (history.some((version) => version.id === versionId && version.isCurrent)) {
+      throw new Error('Currently bound profile cannot be deleted');
+    }
+
+    const nextHistory = history.filter((version) => version.id !== versionId);
+    if (nextHistory.length === history.length) {
+      throw new Error('Historical device profile not found');
+    }
+
+    orm
+      .update(accounts)
+      .set({ deviceHistoryJson: serializeDeviceHistory(nextHistory) })
+      .where(eq(accounts.id, id))
+      .run();
   }
 
   static setActive(id: string): void {
-    const { raw, orm } = getCloudDb();
-
-    try {
-      orm.transaction((tx) => {
-        tx.update(accounts).set({ isActive: 0 }).run();
-        tx.update(accounts).set({ isActive: 1 }).where(eq(accounts.id, id)).run();
-      });
-      logger.info(`Set account ${id} as active`);
-    } finally {
-      raw.close();
-    }
+    const { orm } = getCloudDb();
+    orm.transaction((tx) => {
+      tx.update(accounts).set({ isActive: 0 }).run();
+      tx.update(accounts).set({ isActive: 1 }).where(eq(accounts.id, id)).run();
+    });
+    logger.info(`Set account ${id} as active`);
   }
 
   private static upsertItemValue(db: DrizzleExecutor, key: string, value: string): void {
@@ -1655,7 +1594,7 @@ export class CloudAccountRepo {
       }
       throw error;
     }
-    const { raw, orm } = connection;
+    const { orm } = connection;
     try {
       const rows = orm
         .select({ value: settings.value })
@@ -1670,8 +1609,6 @@ export class CloudAccountRepo {
     } catch (e) {
       logger.error(`Failed to get setting ${key}`, e);
       return defaultValue;
-    } finally {
-      raw.close();
     }
   }
 
@@ -1690,7 +1627,7 @@ export class CloudAccountRepo {
       throw error;
     }
 
-    const { raw, orm } = connection;
+    const { orm } = connection;
     try {
       const stringValue = JSON.stringify(value);
       orm
@@ -1710,8 +1647,6 @@ export class CloudAccountRepo {
         return;
       }
       logger.error(`Failed to set setting ${key}`, error);
-    } finally {
-      raw.close();
     }
   }
 

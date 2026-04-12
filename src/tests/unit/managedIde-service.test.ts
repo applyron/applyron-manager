@@ -42,6 +42,7 @@ const {
 
 vi.mock('../../ipc/config/manager', () => ({
   ConfigManager: {
+    getCachedConfigOrLoad: mockLoadConfig,
     loadConfig: mockLoadConfig,
     saveConfig: mockSaveConfig,
   },
@@ -137,6 +138,7 @@ describe('ManagedIdeService', () => {
       activeRuntimeId: 'windows-local',
       requiresRuntimeSelection: false,
       hasRuntimeMismatch: false,
+      pendingRuntimeApply: null,
       runtimes: [],
     });
     mockListAccounts.mockResolvedValue([
@@ -197,17 +199,22 @@ describe('ManagedIdeService', () => {
     });
     mockRefreshAllAccounts.mockResolvedValue([]);
     mockActivateAccount.mockResolvedValue({
-      id: 'codex-1',
-      email: 'user@example.com',
-      label: null,
-      accountId: 'acc-1',
-      authMode: 'chatgpt',
-      isActive: true,
-      sortOrder: 0,
-      createdAt: 1,
-      updatedAt: 11,
-      lastRefreshedAt: 1000,
-      snapshot: null,
+      account: {
+        id: 'codex-1',
+        email: 'user@example.com',
+        label: null,
+        accountId: 'acc-1',
+        authMode: 'chatgpt',
+        isActive: true,
+        sortOrder: 0,
+        createdAt: 1,
+        updatedAt: 11,
+        lastRefreshedAt: 1000,
+        snapshot: null,
+      },
+      appliedRuntimeId: 'windows-local',
+      didRestartIde: false,
+      deferredUntilIdeRestart: false,
     });
     mockRestoreImportedAccount.mockResolvedValue({
       restoredAccountId: 'codex-1',
@@ -305,9 +312,10 @@ describe('ManagedIdeService', () => {
 
   it('activates a Codex account and persists vscode-codex as the managed target', async () => {
     mockLoadConfig.mockReturnValueOnce({ managed_ide_target: 'antigravity' });
-    const account = await ManagedIdeService.activateCodexAccount('codex-1');
+    const activation = await ManagedIdeService.activateCodexAccount('codex-1');
 
-    expect(account.id).toBe('codex-1');
+    expect(activation.account.id).toBe('codex-1');
+    expect(activation.appliedRuntimeId).toBe('windows-local');
     expect(mockActivateAccount).toHaveBeenCalledWith('codex-1');
     expect(mockSaveConfig).toHaveBeenCalledWith({
       managed_ide_target: 'vscode-codex',

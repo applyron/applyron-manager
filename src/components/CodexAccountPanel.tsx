@@ -54,6 +54,10 @@ const ALERT_PANEL_STYLE = {
   background: 'var(--hud-danger-soft-bg)',
   border: '1px solid var(--hud-danger-soft-border)',
 };
+const WARNING_PANEL_STYLE = {
+  background: 'var(--hud-warning-soft-bg)',
+  border: '1px solid var(--hud-warning-soft-border)',
+};
 const SUMMARY_PILL_STYLE = {
   background: 'var(--hud-panel-alt)',
   border: '1px solid var(--hud-border-soft)',
@@ -62,6 +66,8 @@ const PRIMARY_ADD_BUTTON_CLASS =
   'hud-success-cta border-none px-6 font-bold shadow-lg shadow-emerald-500/20 transition-all hover:opacity-90';
 const PRIMARY_ADD_BUTTON_STYLE = {};
 const CODEX_STATUS_REFETCH_INTERVAL_MS = 1000 * 60 * 5;
+const CODEX_STATUS_PENDING_REFETCH_INTERVAL_MS = 5000;
+const NON_BLOCKING_RUNTIME_SYNC_WARNINGS = new Set(['CODEX_RUNTIME_SYNC_STATE_SKIPPED']);
 
 type VisibleGridLayout = GridLayout;
 
@@ -393,11 +399,14 @@ export function CodexAccountPanel() {
   const { toast } = useToast();
   const { config, saveConfig, isSaving } = useAppConfig();
   const refreshShortcutLabel = getAppShortcutLabel('refreshAccounts', isMacLikePlatform());
+  const [statusRefetchInterval, setStatusRefetchInterval] = useState<number | false>(
+    CODEX_STATUS_REFETCH_INTERVAL_MS,
+  );
 
   const statusQuery = useManagedIdeStatus('vscode-codex', {
     enabled: true,
     refresh: false,
-    refetchInterval: CODEX_STATUS_REFETCH_INTERVAL_MS,
+    refetchInterval: statusRefetchInterval,
   });
   const accountsQuery = useCodexAccounts();
   const addMutation = useAddCodexAccount();
@@ -422,6 +431,13 @@ export function CodexAccountPanel() {
   const availableRuntimes = runtimeStatuses.filter((runtime) => runtime.installation.available);
   const activeRuntime =
     runtimeStatuses.find((runtime) => runtime.id === status?.activeRuntimeId) ?? null;
+  const pendingRuntimeApply = status?.pendingRuntimeApply ?? null;
+  const pendingRuntimeAccount =
+    accounts.find((account) => account.id === pendingRuntimeApply?.recordId) ?? null;
+  const pendingRuntimeLabel = pendingRuntimeApply
+    ? getRuntimeLabel(pendingRuntimeApply.runtimeId, t)
+    : null;
+  const activeRuntimeLabel = activeRuntime ? getRuntimeLabel(activeRuntime.id, t) : null;
   const requiresRuntimeSelection = Boolean(status?.requiresRuntimeSelection);
   const hasRuntimeMismatch = Boolean(status?.hasRuntimeMismatch);
   const runtimeActionBlocked = requiresRuntimeSelection || !installation?.available;
@@ -454,6 +470,14 @@ export function CodexAccountPanel() {
 
     void accountsQuery.refetch();
   }, [accountsQuery, statusQuery.data?.lastUpdatedAt, statusQuery.data?.session.state]);
+
+  useEffect(() => {
+    setStatusRefetchInterval(
+      pendingRuntimeApply
+        ? CODEX_STATUS_PENDING_REFETCH_INTERVAL_MS
+        : CODEX_STATUS_REFETCH_INTERVAL_MS,
+    );
+  }, [pendingRuntimeApply]);
 
   const handleRefreshAll = useCallback(() => {
     if (requiresRuntimeSelection) {
@@ -606,10 +630,31 @@ export function CodexAccountPanel() {
     }
 
     activateMutation.mutate(accountId, {
-      onSuccess: (account) => {
+      onSuccess: (activation) => {
+        const accountIdentity =
+          activation.account.email ||
+          getCodexAccountDisplayIdentity({
+            ...activation.account,
+            planType: activation.account.snapshot?.session.planType,
+          }) ||
+          t('cloud.codex.toast.activatedDescription');
+
+        if (activation.deferredUntilIdeRestart) {
+          toast({
+            title: t('cloud.codex.toast.deferredActivationTitle'),
+            description: t('cloud.codex.toast.deferredActivationDescription', {
+              account: accountIdentity,
+              runtime: activation.appliedRuntimeId
+                ? getRuntimeLabel(activation.appliedRuntimeId, t)
+                : t('managedIde.empty.unknown'),
+            }),
+          });
+          return;
+        }
+
         toast({
           title: t('cloud.codex.toast.activatedTitle'),
-          description: account.email || t('cloud.codex.toast.activatedDescription'),
+          description: accountIdentity,
         });
       },
       onError: (error) => {
@@ -643,17 +688,20 @@ export function CodexAccountPanel() {
       onSuccess: (result) => {
         const source = getRuntimeLabel(result.sourceRuntimeId, t);
         const target = getRuntimeLabel(result.targetRuntimeId, t);
-        const warningDescription = result.warnings
+        const actionableWarnings = result.warnings.filter(
+          (warning) => !NON_BLOCKING_RUNTIME_SYNC_WARNINGS.has(warning),
+        );
+        const warningDescription = actionableWarnings
           .map((warning) => getLocalizedErrorMessage(new Error(warning), t))
           .join(' ');
 
         toast({
           title:
-            result.warnings.length > 0
+            actionableWarnings.length > 0
               ? t('cloud.codex.toast.runtimeSyncWarningTitle')
               : t('cloud.codex.toast.runtimeSyncTitle'),
           description:
-            result.warnings.length > 0
+            actionableWarnings.length > 0
               ? t('cloud.codex.toast.runtimeSyncWarningDescription', {
                   source,
                   target,
@@ -775,174 +823,201 @@ export function CodexAccountPanel() {
   return (
     <div className="space-y-6 pb-20">
       <div
-        className="flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3"
+        className="rounded-2xl border px-4 py-3"
         style={{
           background: 'var(--hud-panel)',
           borderColor: 'var(--hud-border-soft)',
         }}
       >
-        <div
-          className="flex items-center gap-3 rounded-xl border px-3 py-2"
-          style={{ background: 'var(--hud-panel-alt)', borderColor: 'var(--hud-border-soft)' }}
-        >
-          <div className="flex items-center gap-2">
-            <Zap
-              className="h-4 w-4"
-              style={{
-                color: config?.codex_auto_switch_enabled
-                  ? getHudTone('warning').solid
-                  : 'var(--hud-text-subtle)',
-                fill: config?.codex_auto_switch_enabled ? getHudTone('warning').solid : 'none',
-              }}
-            />
-            <span className="text-foreground text-sm font-medium">{t('cloud.autoSwitch')}</span>
-          </div>
-          <Switch
-            id="codex-auto-switch"
-            checked={Boolean(config?.codex_auto_switch_enabled)}
-            onCheckedChange={handleToggleAutoSwitch}
-            disabled={!config || isSaving}
-            className="data-[state=checked]:bg-primary"
-          />
-        </div>
+        <div className="overflow-x-auto">
+          <div className="flex w-max min-w-full items-center gap-2.5" style={{ scrollbarWidth: 'thin' }}>
+            <div
+              className="flex h-11 shrink-0 items-center gap-3 rounded-xl border px-3.5"
+              style={{ background: 'var(--hud-panel-alt)', borderColor: 'var(--hud-border-soft)' }}
+            >
+              <div className="flex items-center gap-2">
+                <Zap
+                  className="h-4 w-4"
+                  style={{
+                    color: config?.codex_auto_switch_enabled
+                      ? getHudTone('warning').solid
+                      : 'var(--hud-text-subtle)',
+                    fill: config?.codex_auto_switch_enabled ? getHudTone('warning').solid : 'none',
+                  }}
+                />
+                <span className="text-foreground whitespace-nowrap text-sm font-semibold">
+                  {t('cloud.autoSwitch')}
+                </span>
+              </div>
+              <Switch
+                id="codex-auto-switch"
+                checked={Boolean(config?.codex_auto_switch_enabled)}
+                onCheckedChange={handleToggleAutoSwitch}
+                disabled={!config || isSaving}
+                className="data-[state=checked]:bg-primary"
+              />
+            </div>
 
-        {activeRuntime ? (
-          <div
-            className="rounded-xl border px-3 py-2 text-sm"
-            style={{ background: 'var(--hud-panel-alt)', borderColor: 'var(--hud-border-soft)' }}
-          >
-            <span className="text-[10px] font-bold tracking-wider text-[var(--hud-text-subtle)] uppercase">
-              {t('managedIde.labels.activeRuntime')}
-            </span>
-            <div className="mt-1 font-semibold">
-              {t('cloud.codex.runtime.activeRuntime', {
-                name: getRuntimeLabel(activeRuntime.id, t),
-              })}
+            {activeRuntime ? (
+              <div
+                className="flex h-11 shrink-0 items-center gap-3 rounded-xl border px-3.5 text-sm"
+                style={{
+                  background: 'var(--hud-panel-alt)',
+                  borderColor: hasRuntimeMismatch
+                    ? 'var(--hud-warning-soft-border)'
+                    : 'var(--hud-border-soft)',
+                }}
+              >
+                <span className="text-[10px] font-bold tracking-[0.2em] text-[var(--hud-text-subtle)] uppercase">
+                  {t('managedIde.labels.activeRuntime')}
+                </span>
+                <span className="text-foreground whitespace-nowrap font-semibold">
+                  {activeRuntimeLabel}
+                </span>
+              </div>
+            ) : null}
+
+            {hasRuntimeMismatch ? (
+              <div
+                className="flex h-9 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap"
+                style={{
+                  background: 'var(--hud-warning-soft-bg)',
+                  border: '1px solid var(--hud-warning-soft-border)',
+                  color: getHudTone('warning').text,
+                }}
+              >
+                {t('cloud.codex.badges.runtimeMismatch')}
+              </div>
+            ) : null}
+
+            {requiresRuntimeSelection ? (
+              <div
+                className="flex h-9 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap"
+                style={{
+                  background: 'var(--hud-danger-soft-bg)',
+                  border: '1px solid var(--hud-danger-soft-border)',
+                  color: getHudTone('danger').text,
+                }}
+              >
+                {t('cloud.codex.badges.runtimeSelectionNeeded')}
+              </div>
+            ) : null}
+
+            <div
+              className="flex h-11 shrink-0 items-center rounded-xl border p-1"
+              style={{ background: 'var(--hud-input-bg)', borderColor: 'var(--hud-border-soft)' }}
+            >
+              <Button
+                variant="ghost"
+                onClick={toggleSelectAllAccounts}
+                title={t('cloud.batch.selectAll')}
+                disabled={selectableAccountIds.length === 0}
+                className="text-foreground hover:bg-accent/60 hover:text-primary h-9 rounded-lg px-3.5 whitespace-nowrap"
+              >
+                <CheckSquare
+                  className={`mr-2 h-4 w-4 ${
+                    allSelectableSelected ? 'fill-primary/20 text-primary' : ''
+                  }`}
+                />
+                {t('cloud.batch.selectAll')}
+              </Button>
+
+              <div
+                className="mx-1 h-5 w-px shrink-0"
+                style={{ background: 'var(--hud-border-soft)' }}
+              />
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleRefreshAll}
+                title={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
+                aria-label={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
+                disabled={
+                  refreshAllMutation.isPending || accounts.length === 0 || requiresRuntimeSelection
+                }
+                className="text-foreground hover:bg-accent/60 hover:text-primary h-9 w-9 rounded-lg"
+              >
+                <RefreshCcw
+                  className={`h-4 w-4 ${refreshAllMutation.isPending ? 'animate-spin' : ''}`}
+                />
+              </Button>
+
+              {canSyncRuntime ? (
+                <>
+                  <div
+                    className="mx-1 h-5 w-px shrink-0"
+                    style={{ background: 'var(--hud-border-soft)' }}
+                  />
+                  <Button
+                    variant="ghost"
+                    onClick={handleSyncRuntimeState}
+                    disabled={syncRuntimeMutation.isPending || requiresRuntimeSelection}
+                    className="text-foreground hover:bg-accent/60 hover:text-primary h-9 rounded-lg px-3.5 whitespace-nowrap"
+                  >
+                    {syncRuntimeMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCcw className="mr-2 h-4 w-4" />
+                    )}
+                    {t('cloud.codex.actions.syncRuntime')}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+
+            <Button
+              onClick={handleAddAccount}
+              disabled={addMutation.isPending || !canAddAccount}
+              className={`${PRIMARY_ADD_BUTTON_CLASS} h-11 shrink-0 whitespace-nowrap px-5`}
+              style={PRIMARY_ADD_BUTTON_STYLE}
+            >
+              {addMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="mr-2 h-4 w-4" />
+              )}
+              {t('cloud.connectedIdentities.addNew', t('cloud.addAccount'))}
+            </Button>
+
+            <div
+              className="ml-auto flex h-11 shrink-0 items-center gap-1 rounded-xl border p-1"
+              style={{ background: 'var(--hud-input-bg)', borderColor: 'var(--hud-border-soft)' }}
+            >
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={gridLayout === '2-col' ? 'secondary' : 'ghost'}
+                      size="icon"
+                      className="text-foreground h-8 w-8"
+                      aria-label={t('cloud.layout.twoCol')}
+                      title={t('cloud.layout.twoCol')}
+                      onClick={() => void updateGridLayout('2-col')}
+                    >
+                      <Columns2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('cloud.layout.twoCol')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={gridLayout === 'list' ? 'secondary' : 'ghost'}
+                      size="icon"
+                      className="text-foreground h-8 w-8"
+                      aria-label={t('cloud.layout.list')}
+                      title={t('cloud.layout.list')}
+                      onClick={() => void updateGridLayout('list')}
+                    >
+                      <List className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('cloud.layout.list')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </div>
-        ) : null}
-
-        {hasRuntimeMismatch ? (
-          <div
-            className="rounded-full px-3 py-1 text-xs font-semibold"
-            style={{
-              background: 'var(--hud-warning-soft-bg)',
-              border: '1px solid var(--hud-warning-soft-border)',
-              color: getHudTone('warning').text,
-            }}
-          >
-            {t('cloud.codex.badges.runtimeMismatch')}
-          </div>
-        ) : null}
-
-        {requiresRuntimeSelection ? (
-          <div
-            className="rounded-full px-3 py-1 text-xs font-semibold"
-            style={{
-              background: 'var(--hud-danger-soft-bg)',
-              border: '1px solid var(--hud-danger-soft-border)',
-              color: getHudTone('danger').text,
-            }}
-          >
-            {t('cloud.codex.badges.runtimeSelectionNeeded')}
-          </div>
-        ) : null}
-
-        <Button
-          variant="outline"
-          onClick={toggleSelectAllAccounts}
-          title={t('cloud.batch.selectAll')}
-          disabled={selectableAccountIds.length === 0}
-          className="text-foreground hover:bg-accent/60 hover:text-primary border-[var(--hud-border-soft)] bg-[var(--hud-input-bg)]"
-        >
-          <CheckSquare
-            className={`mr-2 h-4 w-4 ${
-              allSelectableSelected ? 'fill-primary/20 text-primary' : ''
-            }`}
-          />
-          {t('cloud.batch.selectAll')}
-        </Button>
-
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handleRefreshAll}
-          title={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
-          aria-label={`${t('cloud.codex.actions.refreshAll')} (${refreshShortcutLabel})`}
-          disabled={
-            refreshAllMutation.isPending || accounts.length === 0 || requiresRuntimeSelection
-          }
-          className="text-foreground hover:bg-accent/60 hover:text-primary border-[var(--hud-border-soft)] bg-[var(--hud-input-bg)]"
-        >
-          <RefreshCcw className={`h-4 w-4 ${refreshAllMutation.isPending ? 'animate-spin' : ''}`} />
-        </Button>
-
-        {canSyncRuntime ? (
-          <Button
-            variant="outline"
-            onClick={handleSyncRuntimeState}
-            disabled={syncRuntimeMutation.isPending || requiresRuntimeSelection}
-            className="text-foreground hover:bg-accent/60 hover:text-primary border-[var(--hud-border-soft)] bg-[var(--hud-input-bg)]"
-          >
-            {syncRuntimeMutation.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="mr-2 h-4 w-4" />
-            )}
-            {t('cloud.codex.actions.syncRuntime')}
-          </Button>
-        ) : null}
-
-        <Button
-          onClick={handleAddAccount}
-          disabled={addMutation.isPending || !canAddAccount}
-          className={PRIMARY_ADD_BUTTON_CLASS}
-          style={PRIMARY_ADD_BUTTON_STYLE}
-        >
-          {addMutation.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Plus className="mr-2 h-4 w-4" />
-          )}
-          {t('cloud.connectedIdentities.addNew', t('cloud.addAccount'))}
-        </Button>
-
-        <div
-          className="ml-auto flex items-center gap-1 rounded-xl border p-1"
-          style={{ background: 'var(--hud-input-bg)', borderColor: 'var(--hud-border-soft)' }}
-        >
-          <TooltipProvider delayDuration={0}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={gridLayout === '2-col' ? 'secondary' : 'ghost'}
-                  size="icon"
-                  className="text-foreground h-8 w-8"
-                  aria-label={t('cloud.layout.twoCol')}
-                  title={t('cloud.layout.twoCol')}
-                  onClick={() => void updateGridLayout('2-col')}
-                >
-                  <Columns2 className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('cloud.layout.twoCol')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={gridLayout === 'list' ? 'secondary' : 'ghost'}
-                  size="icon"
-                  className="text-foreground h-8 w-8"
-                  aria-label={t('cloud.layout.list')}
-                  title={t('cloud.layout.list')}
-                  onClick={() => void updateGridLayout('list')}
-                >
-                  <List className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('cloud.layout.list')}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </div>
       </div>
 
@@ -1019,6 +1094,29 @@ export function CodexAccountPanel() {
           <div className="font-medium">{t('managedIde.installation.unavailableTitle')}</div>
           <div className="text-muted-foreground mt-2">
             {t(`managedIde.availability.${installation.reason || 'unknown_error'}`)}
+          </div>
+        </div>
+      ) : null}
+
+      {pendingRuntimeApply ? (
+        <div
+          className="text-foreground rounded-lg border border-dashed p-4 text-sm"
+          style={WARNING_PANEL_STYLE}
+          data-testid="codex-pending-runtime-apply"
+        >
+          <div className="font-medium">{t('cloud.codex.pendingApply.title')}</div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            {t('cloud.codex.pendingApply.description', {
+              account:
+                pendingRuntimeAccount?.email ||
+                (pendingRuntimeAccount
+                  ? getCodexAccountDisplayIdentity({
+                      ...pendingRuntimeAccount,
+                      planType: pendingRuntimeAccount.snapshot?.session.planType,
+                    })
+                  : t('managedIde.empty.unknown')),
+              runtime: pendingRuntimeLabel ?? t('managedIde.empty.unknown'),
+            })}
           </div>
         </div>
       ) : null}

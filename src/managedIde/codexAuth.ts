@@ -256,3 +256,30 @@ export function getCodexEmailHint(authFile: CodexAuthFile | null): string | null
 
   return null;
 }
+
+export function getCodexPlanTypeHint(authFile: CodexAuthFile | null): string | null {
+  if (!authFile?.tokens) {
+    return null;
+  }
+
+  const authClaims = getCodexAuthClaims(authFile);
+  const authPlanType =
+    getNormalizedString(authClaims?.chatgpt_plan_type) ??
+    getNormalizedString(authClaims?.chatgptPlanType);
+  if (authPlanType) {
+    return authPlanType;
+  }
+
+  const idTokenClaims = decodeJwtClaims(authFile.tokens.id_token);
+  const idTokenPlanType =
+    getNormalizedString(idTokenClaims?.plan_type) ?? getNormalizedString(idTokenClaims?.planType);
+  if (idTokenPlanType) {
+    return idTokenPlanType;
+  }
+
+  const accessTokenClaims = decodeJwtClaims(authFile.tokens.access_token);
+  return (
+    getNormalizedString(accessTokenClaims?.plan_type) ??
+    getNormalizedString(accessTokenClaims?.planType)
+  );
+}

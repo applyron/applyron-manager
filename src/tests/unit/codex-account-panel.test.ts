@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CodexAccountPanel } from '@/components/CodexAccountPanel';
@@ -96,6 +96,9 @@ vi.mock('react-i18next', () => ({
         'cloud.codex.runtime.useWindowsLocal': 'Use Windows Local',
         'cloud.codex.runtime.useWslRemote': 'Use WSL Remote',
         'cloud.codex.runtime.stateSummary': '{{name}} · {{state}}',
+        'cloud.codex.pendingApply.title': 'Codex account change is queued',
+        'cloud.codex.pendingApply.description':
+          '{{account}} is selected for {{runtime}}. Close VS Code to apply this account.',
         'cloud.codex.labels.plan': 'Plan',
         'cloud.codex.labels.status': 'Status',
         'cloud.codex.labels.primaryQuota': 'Primary window',
@@ -109,6 +112,14 @@ vi.mock('react-i18next', () => ({
         'cloud.codex.toast.runtimeSyncFailedTitle': 'WSL runtime sync failed',
         'cloud.codex.toast.runtimeSyncWarningTitle': 'WSL runtime sync completed with warnings',
         'cloud.codex.toast.runtimeSyncWarningDescription': '{{source}} -> {{target}}. {{warnings}}',
+        'cloud.codex.toast.activatedTitle': 'Codex account activated',
+        'cloud.codex.toast.activatedDescription':
+          'Applyron Manager switched VS Code Codex to the selected account.',
+        'cloud.codex.toast.deferredActivationTitle': 'Codex account queued',
+        'cloud.codex.toast.deferredActivationDescription':
+          '{{account}} will be applied to {{runtime}} after VS Code closes.',
+        'cloud.errors.codexRuntimeSyncStateSkipped':
+          'Extension state was skipped because the source or target state database was missing.',
         'a11y.expand': 'Expand',
         'a11y.collapse': 'Collapse',
         'a11y.selectAccount': 'Select {{target}}',
@@ -204,6 +215,7 @@ describe('CodexAccountPanel', () => {
         activeRuntimeId: 'windows-local',
         requiresRuntimeSelection: false,
         hasRuntimeMismatch: false,
+        pendingRuntimeApply: null,
         runtimes: [
           {
             id: 'windows-local',
@@ -239,11 +251,56 @@ describe('CodexAccountPanel', () => {
     });
   });
 
+  it('switches to a 5 second refresh cadence while a runtime apply is pending', async () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        pendingRuntimeApply: {
+          runtimeId: 'wsl-remote',
+          recordId: 'standby-1',
+        },
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+        ],
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    await waitFor(() => {
+      expect(mockUseManagedIdeStatus).toHaveBeenLastCalledWith('vscode-codex', {
+        enabled: true,
+        refresh: false,
+        refetchInterval: 5000,
+      });
+    });
+  });
+
   it('renders the parity toolbar and keeps import current only in the empty state', () => {
     render(React.createElement(CodexAccountPanel));
 
     expect(screen.getByText('Auto-Switch')).toBeTruthy();
-    expect(screen.getByText('Active runtime: Windows Local')).toBeTruthy();
+    expect(screen.getByText('Active runtime')).toBeTruthy();
+    expect(screen.getByText('Windows Local')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Select All' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Refresh All/ })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Add New Account' })).toHaveLength(2);
@@ -276,12 +333,12 @@ describe('CodexAccountPanel', () => {
           {
             id: 'windows-local',
             installation: { available: true },
-            session: { state: 'ready' },
+            session: { state: 'ready', email: 'first@example.com' },
           },
           {
             id: 'wsl-remote',
             installation: { available: true },
-            session: { state: 'requires_login' },
+            session: { state: 'ready', email: 'second@example.com' },
           },
         ],
       },
@@ -291,6 +348,75 @@ describe('CodexAccountPanel', () => {
 
     expect(screen.getByText('Runtime mismatch')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'WSL Sync' })).toBeTruthy();
+  });
+
+  it('treats state-only WSL sync warnings as a normal success toast', () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+          {
+            id: 'wsl-remote',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+        ],
+      },
+    });
+    mockUseSyncCodexRuntimeState.mockReturnValue({
+      isPending: false,
+      variables: undefined,
+      mutate: (
+        _value: unknown,
+        options?: {
+          onSuccess?: (result: {
+            sourceRuntimeId: string;
+            targetRuntimeId: string;
+            syncedAuthFile: boolean;
+            syncedExtensionState: boolean;
+            warnings: string[];
+          }) => void;
+        },
+      ) => {
+        options?.onSuccess?.({
+          sourceRuntimeId: 'windows-local',
+          targetRuntimeId: 'wsl-remote',
+          syncedAuthFile: true,
+          syncedExtensionState: false,
+          warnings: ['CODEX_RUNTIME_SYNC_STATE_SKIPPED'],
+        });
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    fireEvent.click(screen.getByRole('button', { name: 'WSL Sync' }));
+
+    const toastCall = mockToast.mock.calls.at(-1)?.[0];
+    expect(toastCall).toEqual({
+      title: 'WSL runtime sync completed',
+      description: 'Windows Local -> WSL Remote',
+    });
   });
 
   it('renders runtime selection buttons when the active side is ambiguous', () => {
@@ -431,6 +557,100 @@ describe('CodexAccountPanel', () => {
 
     expect(screen.getByTestId('codex-account-grid').className).toContain('grid-cols-1');
     expect(screen.getByTestId('codex-account-grid').className).not.toContain('md:grid-cols-2');
+  });
+
+  it('shows a pending runtime apply banner with the selected account and runtime', () => {
+    mockUseManagedIdeStatus.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: {
+        installation: {
+          available: true,
+          idePath: 'C:\\VSCode\\Code.exe',
+          codexCliPath: 'C:\\VSCode\\codex.exe',
+          reason: 'ready',
+        },
+        session: {
+          state: 'ready',
+        },
+        activeRuntimeId: 'windows-local',
+        requiresRuntimeSelection: false,
+        hasRuntimeMismatch: false,
+        pendingRuntimeApply: {
+          runtimeId: 'wsl-remote',
+          recordId: 'standby-1',
+        },
+        runtimes: [
+          {
+            id: 'windows-local',
+            installation: { available: true },
+            session: { state: 'ready' },
+          },
+        ],
+      },
+    });
+    mockUseCodexAccounts.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [createAccount('standby-1')],
+      refetch: vi.fn(),
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    expect(screen.getByTestId('codex-pending-runtime-apply')).toBeTruthy();
+    expect(screen.getByText('Codex account change is queued')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'standby-1@example.com is selected for WSL Remote. Close VS Code to apply this account.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('shows a deferred activation toast when VS Code must close before apply', () => {
+    mockUseCodexAccounts.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [createAccount('standby-1')],
+      refetch: vi.fn(),
+    });
+    mockUseActivateCodexAccount.mockReturnValue({
+      isPending: false,
+      variables: undefined,
+      mutate: (
+        accountId: string,
+        options?: {
+          onSuccess?: (result: {
+            account: { id: string; email: string | null };
+            appliedRuntimeId: 'windows-local' | 'wsl-remote';
+            didRestartIde: boolean;
+            deferredUntilIdeRestart: boolean;
+          }) => void;
+        },
+      ) => {
+        expect(accountId).toBe('standby-1');
+        options?.onSuccess?.({
+          account: {
+            id: 'standby-1',
+            email: 'standby-1@example.com',
+          },
+          appliedRuntimeId: 'wsl-remote',
+          didRestartIde: false,
+          deferredUntilIdeRestart: true,
+        });
+      },
+    });
+
+    render(React.createElement(CodexAccountPanel));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+
+    expect(mockToast).toHaveBeenLastCalledWith({
+      title: 'Codex account queued',
+      description: 'standby-1@example.com will be applied to WSL Remote after VS Code closes.',
+    });
   });
 
   it('requires confirmation before deleting a single Codex account', () => {

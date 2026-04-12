@@ -6,6 +6,7 @@ import {
 } from '../../managedIde/codexIdentity';
 import { ManagedIdeService } from '../../managedIde/service';
 import {
+  CodexAccountActivationResultSchema,
   CodexAccountRecordSchema,
   CodexRuntimeSyncResultSchema,
   ManagedIdeCurrentStatusSchema,
@@ -259,19 +260,26 @@ export const managedIdeRouter = os.router({
         id: z.string().min(1),
       }),
     )
-    .output(CodexAccountRecordSchema)
+    .output(CodexAccountActivationResultSchema)
     .handler(async ({ input }) => {
       try {
-        const account = await ManagedIdeService.activateCodexAccount(input.id);
+        const activation = await ManagedIdeService.activateCodexAccount(input.id);
         ActivityLogService.record({
           category: 'codex',
           action: 'activate',
-          target: buildCodexActivityTarget(account),
+          target: buildCodexActivityTarget(activation.account),
           outcome: 'success',
-          message: 'Codex account activated.',
-          metadata: { accountId: account.accountId, workspaceId: account.workspace?.id ?? null },
+          message: activation.deferredUntilIdeRestart
+            ? 'Codex account activation deferred until the IDE closes.'
+            : 'Codex account activated.',
+          metadata: {
+            accountId: activation.account.accountId,
+            workspaceId: activation.account.workspace?.id ?? null,
+            appliedRuntimeId: activation.appliedRuntimeId,
+            deferredUntilIdeRestart: activation.deferredUntilIdeRestart,
+          },
         });
-        return account;
+        return activation;
       } catch (error) {
         ActivityLogService.record({
           category: 'codex',

@@ -74,6 +74,11 @@ export const ManagedIdeCodexRuntimeStatusSchema = z.object({
   lastUpdatedAt: z.number(),
 });
 
+export const CodexPendingRuntimeApplySchema = z.object({
+  runtimeId: CodexRuntimeIdSchema,
+  recordId: z.string(),
+});
+
 export const ManagedIdeCurrentStatusSchema = z.object({
   targetId: z.enum(['antigravity', 'vscode-codex']),
   installation: ManagedIdeInstallationStatusSchema,
@@ -86,6 +91,7 @@ export const ManagedIdeCurrentStatusSchema = z.object({
   activeRuntimeId: CodexRuntimeIdSchema.nullable(),
   requiresRuntimeSelection: z.boolean(),
   hasRuntimeMismatch: z.boolean(),
+  pendingRuntimeApply: CodexPendingRuntimeApplySchema.nullable().default(null),
   runtimes: z.array(ManagedIdeCodexRuntimeStatusSchema),
 });
 
@@ -153,6 +159,13 @@ export const CodexRuntimeSyncResultSchema = z.object({
   syncedAuthFile: z.boolean(),
   syncedExtensionState: z.boolean(),
   warnings: z.array(z.string()),
+});
+
+export const CodexAccountActivationResultSchema = z.object({
+  account: CodexAccountRecordSchema,
+  appliedRuntimeId: CodexRuntimeIdSchema.nullable(),
+  didRestartIde: z.boolean(),
+  deferredUntilIdeRestart: z.boolean(),
 });
 
 export const CodexImportRestoreStatusSchema = z.enum([

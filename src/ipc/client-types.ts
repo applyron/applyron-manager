@@ -13,6 +13,7 @@ import type {
   ServiceHealthSummary,
 } from '../types/dashboard';
 import type {
+  CodexAccountActivationResult,
   CodexAccountRecord,
   CodexRuntimeSyncResult,
   ManagedIdeCurrentStatus,
@@ -224,7 +225,7 @@ export interface IPCClient {
     importCurrentCodexAccount(): Promise<CodexAccountRecord>;
     refreshCodexAccount(input: { id: string }): Promise<CodexAccountRecord>;
     refreshAllCodexAccounts(): Promise<CodexAccountRecord[]>;
-    activateCodexAccount(input: { id: string }): Promise<CodexAccountRecord>;
+    activateCodexAccount(input: { id: string }): Promise<CodexAccountActivationResult>;
     deleteCodexAccount(input: { id: string }): Promise<void>;
     syncCodexRuntimeState(): Promise<CodexRuntimeSyncResult>;
   };

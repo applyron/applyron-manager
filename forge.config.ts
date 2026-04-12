@@ -20,6 +20,7 @@ import { createDarwinStaticReleaseJson } from './src/utils/staticUpdateRelease';
 
 const nativeRuntimeModules = ['better-sqlite3', 'keytar'];
 const supportRuntimeModules = ['bindings', 'file-uri-to-path'];
+const nativePrebuildToolModules = ['prebuild-install'];
 const keepLanguages = new Set(['en', 'en-US', 'tr']);
 const windowsExecutableName = 'applyron-manager';
 const githubRepository = {
@@ -35,7 +36,13 @@ const isMakeCommand =
   npmLifecycleEvent === 'publish' ||
   process.argv.some((arg) => arg === 'make' || arg === 'publish');
 const isE2EPackageBuild = process.env.APPLYRON_E2E === '1';
-const packagerOutputDirectory = isE2EPackageBuild ? path.join('out', 'e2e') : 'out';
+const customPackagerOutDir = process.env.APPLYRON_FORGE_OUT_DIR?.trim();
+const packagerOutputDirectory =
+  customPackagerOutDir && customPackagerOutDir.length > 0
+    ? customPackagerOutDir
+    : isE2EPackageBuild
+      ? path.join('out', 'e2e')
+      : 'out';
 const productionFusesConfig = {
   [FuseV1Options.RunAsNode]: false,
   [FuseV1Options.EnableCookieEncryption]: true,
@@ -179,6 +186,40 @@ function copyRuntimePackageManifest(buildPath: string) {
 
   fs.copyFileSync(srcPath, destPath);
   console.log(`Copied runtime package manifest to ${destPath}`);
+}
+
+function collectModuleDependencyClosure(moduleNames: string[]) {
+  const pending = [...moduleNames];
+  const resolved = new Set<string>();
+
+  while (pending.length > 0) {
+    const moduleName = pending.pop();
+    if (!moduleName || resolved.has(moduleName)) {
+      continue;
+    }
+
+    const packageJsonPath = path.join(process.cwd(), 'node_modules', moduleName, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) {
+      console.warn(`Runtime rebuild helper module not found: ${moduleName}`);
+      continue;
+    }
+
+    resolved.add(moduleName);
+
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
+        dependencies?: Record<string, string>;
+      };
+      for (const dependencyName of Object.keys(packageJson.dependencies ?? {})) {
+        pending.push(dependencyName);
+      }
+    } catch (error) {
+      console.warn(`Failed to read runtime rebuild helper module metadata: ${moduleName}`);
+      console.warn(error);
+    }
+  }
+
+  return [...resolved];
 }
 
 function copyMissingSupportRuntimeModules(buildPath: string) {
@@ -512,7 +553,13 @@ const config: ForgeConfig = {
     packageAfterCopy: async (_config, buildPath, electronVersion, _platform, arch) => {
       copyAssets(buildPath);
       copyRuntimePackageManifest(buildPath);
-      copyRuntimeModules(buildPath, [...nativeRuntimeModules, ...supportRuntimeModules]);
+      copyRuntimeModules(buildPath, [
+        ...new Set([
+          ...nativeRuntimeModules,
+          ...supportRuntimeModules,
+          ...collectModuleDependencyClosure(nativePrebuildToolModules),
+        ]),
+      ]);
       await rebuild({
         buildPath,
         electronVersion,

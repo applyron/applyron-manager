@@ -22,7 +22,7 @@ export const startGateway = async (port: number): Promise<boolean> => {
     await stopNestServer();
 
     // Load full config, enforce a persisted API key, and start NestJS server.
-    const config = ensureProxyApiKeyInAppConfig(ConfigManager.loadConfig());
+    const config = ensureProxyApiKeyInAppConfig(ConfigManager.getCachedConfigOrLoad());
     const nextConfig = {
       ...config,
       proxy: {
@@ -108,7 +108,7 @@ export const generateApiKey = async (): Promise<string> => {
   const newKey = generateProxyApiKey();
 
   // Save to config
-  const config = ConfigManager.loadConfig();
+  const config = ConfigManager.getCachedConfigOrLoad();
   await ConfigManager.saveConfig({
     ...config,
     proxy: {

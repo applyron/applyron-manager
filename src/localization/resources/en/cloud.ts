@@ -68,6 +68,11 @@ export const enCloud = {
         useWslRemote: 'Use WSL Remote',
         stateSummary: '{{name}} · {{state}}',
       },
+      pendingApply: {
+        title: 'Codex account change is queued',
+        description:
+          '{{account}} is selected for {{runtime}}. Close VS Code to apply this account.',
+      },
       confirmDelete: 'Remove {{target}} from the Codex pool?',
       windows: {
         fiveHours: '5-hour window',
@@ -100,6 +105,9 @@ export const enCloud = {
         importFailedTitle: 'Failed to import Codex session',
         activatedTitle: 'Codex account activated',
         activatedDescription: 'Applyron Manager switched VS Code Codex to the selected account.',
+        deferredActivationTitle: 'Codex account queued',
+        deferredActivationDescription:
+          '{{account}} will be applied to {{runtime}} after VS Code closes.',
         activateFailedTitle: 'Failed to activate Codex account',
         deletedTitle: 'Codex account removed',
         deletedDescription: 'The selected Codex account was removed from your Applyron pool.',

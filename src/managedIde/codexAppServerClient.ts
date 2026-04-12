@@ -26,6 +26,10 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
+interface CodexRequestOptions {
+  timeoutMs?: number;
+}
+
 interface PendingLoginCompletion {
   resolve: (value: void) => void;
   reject: (error: Error) => void;
@@ -160,37 +164,32 @@ export class CodexAppServerClient {
     await this.start();
     await this.ensureInitialized();
 
-    const timeout = setTimeout(() => {
-      for (const [requestId, pending] of this.pendingRequests.entries()) {
-        pending.reject(new Error(`Codex app-server request timed out: ${requestId}`));
-      }
-      this.pendingRequests.clear();
-    }, timeoutMs);
-
     try {
-      const [accountResult, rateLimitResult, authStatusResult, configReadResult] =
+      const [accountResult, authStatusResult, configReadResult, rateLimitResult] =
         await Promise.allSettled([
-          this.request('account/read', { refreshToken: false }),
-          this.request('account/rateLimits/read', undefined),
-          this.request('getAuthStatus', {
-            includeToken: false,
-            refreshToken: false,
-          }),
-          this.request('config/read', {
-            includeLayers: false,
-          }),
+          this.request('account/read', { refreshToken: false }, { timeoutMs }),
+          this.request(
+            'getAuthStatus',
+            {
+              includeToken: false,
+              refreshToken: false,
+            },
+            { timeoutMs },
+          ),
+          this.request(
+            'config/read',
+            {
+              includeLayers: false,
+            },
+            { timeoutMs },
+          ),
+          this.request('account/rateLimits/read', undefined, { timeoutMs }),
         ]);
 
       if (accountResult.status === 'fulfilled') {
         accountResponse = accountResult.value as CodexAccountResponse;
       } else {
         logger.warn('Codex app-server account/read failed', accountResult.reason);
-      }
-
-      if (rateLimitResult.status === 'fulfilled') {
-        rateLimitsResponse = rateLimitResult.value as CodexRateLimitsResponse;
-      } else {
-        logger.warn('Codex app-server account/rateLimits/read failed', rateLimitResult.reason);
       }
 
       if (authStatusResult.status === 'fulfilled') {
@@ -203,6 +202,12 @@ export class CodexAppServerClient {
         configReadResponse = configReadResult.value as CodexConfigReadResponse;
       } else {
         logger.warn('Codex app-server config/read failed', configReadResult.reason);
+      }
+
+      if (rateLimitResult.status === 'fulfilled') {
+        rateLimitsResponse = rateLimitResult.value as CodexRateLimitsResponse;
+      } else {
+        logger.warn('Codex app-server account/rateLimits/read failed', rateLimitResult.reason);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -233,7 +238,6 @@ export class CodexAppServerClient {
         latestRateLimitsNotification,
       };
     } finally {
-      clearTimeout(timeout);
       await this.dispose();
     }
   }
@@ -419,7 +423,11 @@ export class CodexAppServerClient {
     }
   }
 
-  private request(method: string, params: unknown): Promise<unknown> {
+  private request(
+    method: string,
+    params: unknown,
+    options?: CodexRequestOptions,
+  ): Promise<unknown> {
     if (!this.child) {
       return Promise.reject(new Error('Codex app-server process is not running'));
     }
@@ -431,7 +439,28 @@ export class CodexAppServerClient {
         : JSON.stringify({ id, method, params });
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
+      const timeout =
+        typeof options?.timeoutMs === 'number'
+          ? setTimeout(() => {
+              this.pendingRequests.delete(id);
+              reject(new Error(`Codex app-server request timed out: ${id}`));
+            }, options.timeoutMs)
+          : null;
+
+      this.pendingRequests.set(id, {
+        resolve: (value) => {
+          if (timeout) {
+            clearTimeout(timeout);
+          }
+          resolve(value);
+        },
+        reject: (error) => {
+          if (timeout) {
+            clearTimeout(timeout);
+          }
+          reject(error);
+        },
+      });
       this.child?.stdin.write(`${payload}\n`);
     });
   }

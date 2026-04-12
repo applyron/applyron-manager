@@ -105,4 +105,56 @@ describe('ConfigManager', () => {
     expect(loaded.grid_layout).toBe('2-col');
     expect(persisted.grid_layout).toBe('2-col');
   });
+
+  it('returns the cached config without re-reading disk when available', async () => {
+    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_APP_CONFIG), 'utf8');
+
+    vi.doMock('../../config/managerBrand', () => ({
+      getManagerConfigPath: () => configPath,
+    }));
+    vi.doMock('../../utils/logger', () => ({
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+    }));
+
+    const readSpy = vi.spyOn(fs, 'readFileSync');
+    const { ConfigManager } = await import('../../ipc/config/manager');
+    const loaded = ConfigManager.loadConfig();
+    const cached = ConfigManager.getCachedConfigOrLoad();
+
+    expect(cached).toEqual(loaded);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops legacy deferred runtime apply entries that do not include a record id', async () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...DEFAULT_APP_CONFIG,
+        codex_pending_runtime_apply: {
+          runtimeId: 'windows-local',
+        },
+      }),
+      'utf8',
+    );
+
+    vi.doMock('../../config/managerBrand', () => ({
+      getManagerConfigPath: () => configPath,
+    }));
+    vi.doMock('../../utils/logger', () => ({
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+    }));
+
+    const { ConfigManager } = await import('../../ipc/config/manager');
+    const loaded = ConfigManager.loadConfig();
+
+    expect(loaded.codex_pending_runtime_apply).toBeNull();
+  });
 });

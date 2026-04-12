@@ -10,18 +10,70 @@ import { parseRow } from '../../utils/sqlite';
 import { openDrizzleConnection } from './dbConnection';
 import { itemTable } from './schema';
 
+const IDE_DB_BUSY_TIMEOUT_MS = 3000;
+
 const KEYS_TO_BACKUP: ItemTableKey[] = [
   'antigravityAuthStatus',
   'jetskiStateSync.agentManagerInitState',
   'antigravityUnifiedStateSync.oauthToken',
 ];
 
-function openIdeDb(dbPath: string, readOnly = false): ReturnType<typeof openDrizzleConnection> {
+type IdeDbConnection = ReturnType<typeof openDrizzleConnection>;
+
+let ideDbOwnerConnection: IdeDbConnection | null = null;
+let ideDbOwnerPath: string | null = null;
+
+function openIdeDb(dbPath: string, readOnly = false): IdeDbConnection {
   return openDrizzleConnection(
     dbPath,
     { readonly: readOnly, fileMustExist: false },
-    { readOnly, busyTimeoutMs: 3000 },
+    { readOnly, busyTimeoutMs: IDE_DB_BUSY_TIMEOUT_MS },
   );
+}
+
+function resolveDatabasePath(dbPath?: string): string {
+  const targetPath = dbPath || getAntigravityDbPaths()[0];
+
+  if (!targetPath) {
+    throw new Error('No legacy Antigravity data path found.');
+  }
+
+  return targetPath;
+}
+
+function openIdeDbWithBusyHandling(dbPath: string, readOnly = false): IdeDbConnection {
+  try {
+    return openIdeDb(dbPath, readOnly);
+  } catch (error: unknown) {
+    const err = error as { code?: string };
+    if (err.code === 'SQLITE_BUSY' || err.code === 'SQLITE_LOCKED') {
+      throw new Error('Database is locked. Please close Antigravity before proceeding.');
+    }
+    throw error;
+  }
+}
+
+function closeIdeDbOwnerConnection(): void {
+  if (!ideDbOwnerConnection) {
+    return;
+  }
+
+  ideDbOwnerConnection.raw.close();
+  ideDbOwnerConnection = null;
+  ideDbOwnerPath = null;
+}
+
+function getSharedDatabaseConnection(): IdeDbConnection {
+  const targetPath = resolveDatabasePath();
+  ensureDatabaseExists(targetPath);
+
+  if (!ideDbOwnerConnection || ideDbOwnerPath !== targetPath) {
+    closeIdeDbOwnerConnection();
+    ideDbOwnerConnection = openIdeDbWithBusyHandling(targetPath);
+    ideDbOwnerPath = targetPath;
+  }
+
+  return ideDbOwnerConnection;
 }
 
 /**
@@ -30,18 +82,16 @@ function openIdeDb(dbPath: string, readOnly = false): ReturnType<typeof openDriz
  */
 export function initDatabase(): void {
   try {
-    const dbPaths = getAntigravityDbPaths();
-    if (dbPaths.length === 0) {
-      throw new Error('No legacy Antigravity data path found.');
-    }
-
-    const { raw } = getDatabaseConnection();
-    raw.close();
+    getSharedDatabaseConnection();
     logger.info('Database initialized and verified (WAL mode)');
   } catch (error) {
     logger.error('Failed to initialize database on startup', error);
     throw error;
   }
+}
+
+export function shutdownDatabase(): void {
+  closeIdeDbOwnerConnection();
 }
 
 /**
@@ -86,23 +136,9 @@ function ensureDatabaseExists(dbPath: string): void {
  * @returns {ReturnType<typeof openDrizzleConnection>} The database connection.
  */
 export function getDatabaseConnection(dbPath?: string): ReturnType<typeof openDrizzleConnection> {
-  const targetPath = dbPath || getAntigravityDbPaths()[0];
-
-  if (!targetPath) {
-    throw new Error('No legacy Antigravity data path found.');
-  }
-
+  const targetPath = resolveDatabasePath(dbPath);
   ensureDatabaseExists(targetPath);
-
-  try {
-    return openIdeDb(targetPath);
-  } catch (error: unknown) {
-    const err = error as { code?: string };
-    if (err.code === 'SQLITE_BUSY' || err.code === 'SQLITE_LOCKED') {
-      throw new Error('Database is locked. Please close Antigravity before proceeding.');
-    }
-    throw error;
-  }
+  return openIdeDbWithBusyHandling(targetPath);
 }
 
 function readItemValue(
@@ -124,10 +160,8 @@ function readItemValue(
  * @returns {AccountInfo} The current account info.
  */
 export function getCurrentAccountInfo(): AccountInfo {
-  // NOTE Database existence is now handled by getDatabaseConnection
-  let connection: ReturnType<typeof openDrizzleConnection> | null = null;
   try {
-    connection = getDatabaseConnection();
+    const connection = getSharedDatabaseConnection();
     const { orm } = connection;
 
     // Query for auth status
@@ -218,17 +252,12 @@ export function getCurrentAccountInfo(): AccountInfo {
   } catch (error) {
     logger.error('Failed to get current account info', error);
     throw error;
-  } finally {
-    if (connection) {
-      connection.raw.close();
-    }
   }
 }
 
 export function backupAccount(account: AccountBackupData['account']): AccountBackupData {
-  let connection: ReturnType<typeof openDrizzleConnection> | null = null;
   try {
-    connection = getDatabaseConnection();
+    const connection = getSharedDatabaseConnection();
     const { orm } = connection;
 
     // NOTE Backup only specific keys
@@ -260,10 +289,6 @@ export function backupAccount(account: AccountBackupData['account']): AccountBac
   } catch (error) {
     logger.error('Failed to backup account', error);
     throw error;
-  } finally {
-    if (connection) {
-      connection.raw.close();
-    }
   }
 }
 

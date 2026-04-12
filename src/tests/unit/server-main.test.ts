@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  bootstrapNestServer,
+  isAllowedLoopbackOrigin,
+  stopNestServer,
+} from '../../server/main';
 
 const mockEnableCors = vi.fn();
 const mockListen = vi.fn(async () => undefined);
@@ -39,9 +44,7 @@ describe('server main security hardening', () => {
     vi.clearAllMocks();
   });
 
-  it('allows only loopback origins', async () => {
-    const { isAllowedLoopbackOrigin } = await import('../../server/main');
-
+  it('allows only loopback origins', () => {
     expect(isAllowedLoopbackOrigin(undefined)).toBe(true);
     expect(isAllowedLoopbackOrigin('http://localhost:5173')).toBe(true);
     expect(isAllowedLoopbackOrigin('http://127.0.0.1:3000')).toBe(true);
@@ -50,8 +53,6 @@ describe('server main security hardening', () => {
   });
 
   it('refuses to bootstrap without a proxy API key', async () => {
-    const { bootstrapNestServer, stopNestServer } = await import('../../server/main');
-
     await expect(
       bootstrapNestServer({
         enabled: true,
@@ -85,8 +86,6 @@ describe('server main security hardening', () => {
   });
 
   it('binds the proxy server to 127.0.0.1 and applies the CORS gate', async () => {
-    const { bootstrapNestServer, stopNestServer } = await import('../../server/main');
-
     await expect(
       bootstrapNestServer({
         enabled: true,

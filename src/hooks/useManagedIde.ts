@@ -129,16 +129,17 @@ export function useAddCodexAccount() {
     mutationFn: addCodexAccount,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts,
+          refetchType: 'active',
+        }),
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+          refetchType: 'active',
         }),
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.targets }),
-      ]);
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
-        queryClient.refetchQueries({
-          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.targets,
+          refetchType: 'active',
         }),
       ]);
     },
@@ -152,16 +153,17 @@ export function useImportCurrentCodexAccount() {
     mutationFn: importCurrentCodexAccount,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts,
+          refetchType: 'active',
+        }),
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+          refetchType: 'active',
         }),
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.targets }),
-      ]);
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
-        queryClient.refetchQueries({
-          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.targets,
+          refetchType: 'active',
         }),
       ]);
     },
@@ -201,16 +203,17 @@ export function useActivateCodexAccount() {
     mutationFn: activateCodexAccount,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts,
+          refetchType: 'active',
+        }),
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+          refetchType: 'active',
         }),
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.targets }),
-      ]);
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
-        queryClient.refetchQueries({
-          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.targets,
+          refetchType: 'active',
         }),
       ]);
     },
@@ -224,15 +227,13 @@ export function useDeleteCodexAccount() {
     mutationFn: deleteCodexAccount,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts,
+          refetchType: 'active',
+        }),
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
-        }),
-      ]);
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
-        queryClient.refetchQueries({
-          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+          refetchType: 'active',
         }),
       ]);
     },
@@ -246,16 +247,17 @@ export function useSyncCodexRuntimeState() {
     mutationFn: syncCodexRuntimeState,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts,
+          refetchType: 'active',
+        }),
         queryClient.invalidateQueries({
           queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+          refetchType: 'active',
         }),
-        queryClient.invalidateQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.targets }),
-      ]);
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: MANAGED_IDE_QUERY_KEYS.codexAccounts }),
-        queryClient.refetchQueries({
-          queryKey: MANAGED_IDE_QUERY_KEYS.status('vscode-codex'),
+        queryClient.invalidateQueries({
+          queryKey: MANAGED_IDE_QUERY_KEYS.targets,
+          refetchType: 'active',
         }),
       ]);
     },

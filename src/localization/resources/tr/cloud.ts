@@ -68,6 +68,11 @@ export const trCloud = {
         useWslRemote: 'WSL Remote kullan',
         stateSummary: '{{name}} · {{state}}',
       },
+      pendingApply: {
+        title: 'Codex hesap değişimi sıraya alındı',
+        description:
+          '{{account}} hesabı {{runtime}} için seçildi. Bu hesabı uygulamak için VS Code’u kapatın.',
+      },
       confirmDelete: '{{target}} hesabı Codex havuzundan kaldırılsın mı?',
       windows: {
         fiveHours: '5 saatlik pencere',
@@ -100,6 +105,9 @@ export const trCloud = {
         importFailedTitle: 'Codex oturumu içe aktarılamadı',
         activatedTitle: 'Codex hesabı etkinleştirildi',
         activatedDescription: "Applyron Manager, VS Code Codex'i seçilen hesaba geçirdi.",
+        deferredActivationTitle: 'Codex hesabı sıraya alındı',
+        deferredActivationDescription:
+          '{{account}} hesabı, VS Code kapandıktan sonra {{runtime}} tarafına uygulanacak.',
         activateFailedTitle: 'Codex hesabı etkinleştirilemedi',
         deletedTitle: 'Codex hesabı kaldırıldı',
         deletedDescription: 'Seçilen Codex hesabı Applyron havuzundan kaldırıldı.',

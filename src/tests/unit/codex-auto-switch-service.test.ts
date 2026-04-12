@@ -4,18 +4,19 @@ const {
   mockLoadConfig,
   mockGetCurrentStatus,
   mockRefreshAllCodexAccounts,
-  mockActivateCodexAccount,
+  mockTryAutoSwitchCodexAccount,
   mockIsPackagedE2EEnvironment,
 } = vi.hoisted(() => ({
   mockLoadConfig: vi.fn(),
   mockGetCurrentStatus: vi.fn(),
   mockRefreshAllCodexAccounts: vi.fn(),
-  mockActivateCodexAccount: vi.fn(),
+  mockTryAutoSwitchCodexAccount: vi.fn(),
   mockIsPackagedE2EEnvironment: vi.fn(() => false),
 }));
 
 vi.mock('../../ipc/config/manager', () => ({
   ConfigManager: {
+    getCachedConfigOrLoad: mockLoadConfig,
     loadConfig: mockLoadConfig,
   },
 }));
@@ -24,7 +25,7 @@ vi.mock('../../managedIde/service', () => ({
   ManagedIdeService: {
     getCurrentStatus: mockGetCurrentStatus,
     refreshAllCodexAccounts: mockRefreshAllCodexAccounts,
-    activateCodexAccount: mockActivateCodexAccount,
+    tryAutoSwitchCodexAccount: mockTryAutoSwitchCodexAccount,
   },
 }));
 
@@ -107,9 +108,10 @@ describe('CodexAutoSwitchService', () => {
       installation: {
         available: true,
       },
+      pendingRuntimeApply: null,
     });
     mockRefreshAllCodexAccounts.mockResolvedValue([]);
-    mockActivateCodexAccount.mockResolvedValue(undefined);
+    mockTryAutoSwitchCodexAccount.mockResolvedValue(true);
     mockIsPackagedE2EEnvironment.mockReturnValue(false);
   });
 
@@ -123,7 +125,7 @@ describe('CodexAutoSwitchService', () => {
     const switched = await CodexAutoSwitchService.poll();
 
     expect(switched).toBe(true);
-    expect(mockActivateCodexAccount).toHaveBeenCalledWith('standby-better');
+    expect(mockTryAutoSwitchCodexAccount).toHaveBeenCalledWith('standby-better', 'active');
   });
 
   it('does not switch when no ready standby account exists', async () => {
@@ -136,7 +138,25 @@ describe('CodexAutoSwitchService', () => {
     const switched = await CodexAutoSwitchService.poll();
 
     expect(switched).toBe(false);
-    expect(mockActivateCodexAccount).not.toHaveBeenCalled();
+    expect(mockTryAutoSwitchCodexAccount).not.toHaveBeenCalled();
+  });
+
+  it('does not switch while a deferred runtime apply is pending', async () => {
+    mockGetCurrentStatus.mockResolvedValue({
+      installation: {
+        available: true,
+      },
+      pendingRuntimeApply: {
+        runtimeId: 'wsl-remote',
+        recordId: 'standby-better',
+      },
+    });
+
+    const switched = await CodexAutoSwitchService.poll();
+
+    expect(switched).toBe(false);
+    expect(mockRefreshAllCodexAccounts).not.toHaveBeenCalled();
+    expect(mockTryAutoSwitchCodexAccount).not.toHaveBeenCalled();
   });
 
   it('starts and stops from config sync while preserving the packaged E2E exception', async () => {

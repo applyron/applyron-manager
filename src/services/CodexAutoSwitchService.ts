@@ -16,7 +16,7 @@ export class CodexAutoSwitchService {
   }
 
   static async syncWithConfig(config?: AppConfig): Promise<void> {
-    const resolvedConfig = config ?? ConfigManager.loadConfig();
+    const resolvedConfig = config ?? ConfigManager.getCachedConfigOrLoad();
 
     if (isPackagedE2EEnvironment()) {
       if (resolvedConfig.codex_auto_switch_enabled) {
@@ -64,7 +64,7 @@ export class CodexAutoSwitchService {
       return false;
     }
 
-    if (!ConfigManager.loadConfig().codex_auto_switch_enabled) {
+    if (!ConfigManager.getCachedConfigOrLoad().codex_auto_switch_enabled) {
       return false;
     }
 
@@ -77,6 +77,13 @@ export class CodexAutoSwitchService {
       });
       if (!currentStatus.installation.available) {
         logger.info('Codex auto-switch skipped because VS Code Codex is unavailable.');
+        return false;
+      }
+
+      if (currentStatus.pendingRuntimeApply) {
+        logger.info(
+          'Codex auto-switch skipped because a deferred Codex runtime apply is pending.',
+        );
         return false;
       }
 
@@ -101,8 +108,7 @@ export class CodexAutoSwitchService {
       logger.info(
         `Codex auto-switch: switching from ${activeAccount.id} (${activeHealth}) to ${nextAccount.id}.`,
       );
-      await ManagedIdeService.activateCodexAccount(nextAccount.id);
-      return true;
+      return ManagedIdeService.tryAutoSwitchCodexAccount(nextAccount.id, activeAccount.id);
     } catch (error) {
       logger.error('Codex auto-switch poll failed', error);
       return false;

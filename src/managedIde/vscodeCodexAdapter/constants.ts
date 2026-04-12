@@ -1,0 +1,9 @@
+export const OPENAI_EXTENSION_ID = 'openai.chatgpt';
+export const CACHE_KEY = 'managedIde.status.vscode-codex';
+export const WINDOWS_LOCAL_RUNTIME_LABEL = 'Windows Local';
+export const WSL_REMOTE_RUNTIME_LABEL = 'WSL Remote';
+export const CODEX_GLOBAL_STATE_DB_TIMEOUT_MS = 500;
+export const CODEX_GLOBAL_STATE_LOCK_BACKOFF_MS = 15_000;
+export const CODEX_ACCOUNT_APPLY_VERIFY_TIMEOUT_MS = 15_000;
+export const CODEX_ACCOUNT_APPLY_VERIFY_POLL_MS = 750;
+export const CODEX_DEFERRED_RUNTIME_APPLY_POLL_MS = 15_000;
