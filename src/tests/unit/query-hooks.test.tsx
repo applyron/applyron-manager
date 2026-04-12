@@ -3,15 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockAddCodexAccount,
-  mockActivateCodexAccount,
-  mockRefreshAccountQuota,
-} = vi.hoisted(() => ({
-  mockAddCodexAccount: vi.fn(),
-  mockActivateCodexAccount: vi.fn(),
-  mockRefreshAccountQuota: vi.fn(),
-}));
+const { mockAddCodexAccount, mockActivateCodexAccount, mockRefreshAccountQuota } = vi.hoisted(
+  () => ({
+    mockAddCodexAccount: vi.fn(),
+    mockActivateCodexAccount: vi.fn(),
+    mockRefreshAccountQuota: vi.fn(),
+  }),
+);
 
 vi.mock('@/actions/managedIde', () => ({
   activateCodexAccount: mockActivateCodexAccount,
@@ -75,9 +73,8 @@ describe('query hooks', () => {
   });
 
   it('invalidates managed IDE queries without issuing explicit refetches', async () => {
-    const { MANAGED_IDE_QUERY_KEYS, useAddCodexAccount, useActivateCodexAccount } = await import(
-      '../../hooks/useManagedIde'
-    );
+    const { MANAGED_IDE_QUERY_KEYS, useAddCodexAccount, useActivateCodexAccount } =
+      await import('../../hooks/useManagedIde');
 
     for (const runCase of [
       {
@@ -167,7 +164,9 @@ describe('query hooks', () => {
       await result.current.mutateAsync('cloud-1' as never);
     });
 
-    const cachedAccounts = queryClient.getQueryData<Array<{ email: string }>>(QUERY_KEYS.cloudAccounts);
+    const cachedAccounts = queryClient.getQueryData<Array<{ email: string }>>(
+      QUERY_KEYS.cloudAccounts,
+    );
     expect(setQueryDataSpy).toHaveBeenCalled();
     expect(invalidateSpy).not.toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: QUERY_KEYS.cloudAccounts }),

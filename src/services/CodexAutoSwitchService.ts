@@ -81,9 +81,7 @@ export class CodexAutoSwitchService {
       }
 
       if (currentStatus.pendingRuntimeApply) {
-        logger.info(
-          'Codex auto-switch skipped because a deferred Codex runtime apply is pending.',
-        );
+        logger.info('Codex auto-switch skipped because a deferred Codex runtime apply is pending.');
         return false;
       }
 

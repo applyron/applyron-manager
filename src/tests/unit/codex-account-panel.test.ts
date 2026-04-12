@@ -252,11 +252,13 @@ describe('CodexAccountPanel', () => {
   it('uses a fixed 5 minute refresh cadence for Codex status polling', () => {
     render(React.createElement(CodexAccountPanel));
 
+    const options = mockUseManagedIdeStatus.mock.calls[0]?.[1];
     expect(mockUseManagedIdeStatus).toHaveBeenCalledWith('vscode-codex', {
       enabled: true,
       refresh: false,
-      refetchInterval: 300000,
+      refetchInterval: expect.any(Function),
     });
+    expect(options.refetchInterval({ state: { data: undefined } })).toBe(300000);
   });
 
   it('switches to a 5 second refresh cadence while a runtime apply is pending', async () => {
@@ -296,11 +298,17 @@ describe('CodexAccountPanel', () => {
     render(React.createElement(CodexAccountPanel));
 
     await waitFor(() => {
-      expect(mockUseManagedIdeStatus).toHaveBeenLastCalledWith('vscode-codex', {
+      const options = mockUseManagedIdeStatus.mock.calls.at(-1)?.[1];
+      expect(options).toEqual({
         enabled: true,
         refresh: false,
-        refetchInterval: 5000,
+        refetchInterval: expect.any(Function),
       });
+      expect(
+        options.refetchInterval({
+          state: { data: mockUseManagedIdeStatus.mock.results.at(-1)?.value.data },
+        }),
+      ).toBe(5000);
     });
   });
 

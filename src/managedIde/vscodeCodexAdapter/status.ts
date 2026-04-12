@@ -17,7 +17,7 @@ import {
 import { ManagedIdeCurrentStatusSchema } from '../schemas';
 import { CACHE_KEY } from './constants';
 import { readCodexGlobalStateSnapshot } from './globalStateDb';
-import { getFileUpdatedAt, isWindowsWslRemoteRuntime, runWslShellCommand } from './runtimeEnvironment';
+import { isWindowsWslRemoteRuntime, runWslShellCommand } from './runtimeEnvironment';
 import { getLiveCodexAccountIdentityKey } from './accountIdentity';
 import type { CodexGlobalStateSnapshot, CodexRuntimeEnvironment } from './types';
 import type {
@@ -346,11 +346,7 @@ export async function withTemporaryCodexHome<T>(
   action: (codexHomePaths: { hostPath: string; runtimePath: string }) => Promise<T>,
 ): Promise<T> {
   if (isWindowsWslRemoteRuntime(runtime) && runtime.wslDistroName && runtime.wslLinuxHomePath) {
-    const runtimeBasePath = path.posix.join(
-      runtime.wslLinuxHomePath,
-      '.applyron-manager',
-      'tmp',
-    );
+    const runtimeBasePath = path.posix.join(runtime.wslLinuxHomePath, '.applyron-manager', 'tmp');
     const runtimePath = runWslShellCommand(
       runtime.wslDistroName,
       `mkdir -p ${JSON.stringify(runtimeBasePath)} && mktemp -d -p ${JSON.stringify(
@@ -431,84 +427,75 @@ export async function buildRuntimeStatusFromAuthFile(input: {
     );
 
   try {
-    return await withTemporaryCodexHome(
-      runtime,
-      'applyron-codex-probe-',
-      async (codexHome) => {
-        writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome.hostPath));
+    return await withTemporaryCodexHome(runtime, 'applyron-codex-probe-', async (codexHome) => {
+      writeCodexAuthFile(authFile, getCodexAuthFilePath(codexHome.hostPath));
 
-        const client = createCodexClient(runtime, codexHome.runtimePath);
-        const snapshot = await client.collectSnapshot();
-        const rateLimits =
-          normalizeQuotaSnapshot(snapshot.rateLimits?.rateLimits) ||
-          normalizeQuotaSnapshot(snapshot.latestRateLimitsNotification?.rateLimits);
+      const client = createCodexClient(runtime, codexHome.runtimePath);
+      const snapshot = await client.collectSnapshot();
+      const rateLimits =
+        normalizeQuotaSnapshot(snapshot.rateLimits?.rateLimits) ||
+        normalizeQuotaSnapshot(snapshot.latestRateLimitsNotification?.rateLimits);
 
-        const rateLimitsByLimitId = snapshot.rateLimits?.rateLimitsByLimitId
-          ? Object.fromEntries(
-              Object.entries(snapshot.rateLimits.rateLimitsByLimitId)
-                .map(([limitId, limitSnapshot]) => [
-                  limitId,
-                  normalizeQuotaSnapshot(limitSnapshot),
-                ])
-                .filter((entry): entry is [string, ManagedIdeQuotaSnapshot] => entry[1] !== null),
-            )
-          : null;
+      const rateLimitsByLimitId = snapshot.rateLimits?.rateLimitsByLimitId
+        ? Object.fromEntries(
+            Object.entries(snapshot.rateLimits.rateLimitsByLimitId)
+              .map(([limitId, limitSnapshot]) => [limitId, normalizeQuotaSnapshot(limitSnapshot)])
+              .filter((entry): entry is [string, ManagedIdeQuotaSnapshot] => entry[1] !== null),
+          )
+        : null;
 
-        const account = snapshot.account?.account ?? null;
-        const sessionState: ManagedIdeSessionSnapshot['state'] = account
-          ? 'ready'
-          : 'requires_login';
-        const planType =
-          account?.planType ??
-          rateLimits?.planType ??
-          snapshot.planTypeHint ??
-          (globalStateHints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
-        const email = input.getPreferredCodexEmail(authFile, account?.email);
+      const account = snapshot.account?.account ?? null;
+      const sessionState: ManagedIdeSessionSnapshot['state'] = account ? 'ready' : 'requires_login';
+      const planType =
+        account?.planType ??
+        rateLimits?.planType ??
+        snapshot.planTypeHint ??
+        (globalStateHints.codexCloudAccess === 'enabled_needs_setup' ? 'unknown' : null);
+      const email = input.getPreferredCodexEmail(authFile, account?.email);
 
-        return createRuntimeStatusSnapshot(runtime, {
-          installation: runtime.installation,
-          session: {
-            state: sessionState,
-            accountType: account?.type ?? null,
-            authMode:
-              normalizeManagedIdeAuthMode(snapshot.authMode) ??
-              normalizeManagedIdeAuthMode(snapshot.authStatus?.authMethod) ??
-              (account?.type === 'chatgpt'
-                ? 'chatgpt'
-                : account?.type === 'apiKey'
-                  ? 'apikey'
-                  : normalizeManagedIdeAuthMode(authFile.auth_mode)),
-            email,
-            planType,
-            requiresOpenaiAuth:
-              snapshot.account?.requiresOpenaiAuth ??
-              snapshot.authStatus?.requiresOpenaiAuth ??
-              !account,
-            serviceTier: normalizeCodexServiceTier(
-              snapshot.config?.config?.service_tier ?? globalStateHints.defaultServiceTier,
-            ),
-            agentMode: normalizeCodexAgentMode(globalStateHints.agentMode),
-            lastUpdatedAt,
-          },
-          liveAccountIdentityKey: getLiveCodexAccountIdentityKey({
-            authFile,
-            planType,
-            fallbackEmail: email,
-          }),
-          quota: rateLimits,
-          quotaByLimitId:
-            rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
-              ? rateLimitsByLimitId
-              : null,
-          authFilePath: runtime.authFilePath,
-          stateDbPath: runtime.stateDbPath,
-          storagePath: runtime.storagePath,
-          authLastUpdatedAt: runtime.authLastUpdatedAt,
-          extensionStateUpdatedAt: globalStateHints.updatedAt ?? runtime.extensionStateUpdatedAt,
+      return createRuntimeStatusSnapshot(runtime, {
+        installation: runtime.installation,
+        session: {
+          state: sessionState,
+          accountType: account?.type ?? null,
+          authMode:
+            normalizeManagedIdeAuthMode(snapshot.authMode) ??
+            normalizeManagedIdeAuthMode(snapshot.authStatus?.authMethod) ??
+            (account?.type === 'chatgpt'
+              ? 'chatgpt'
+              : account?.type === 'apiKey'
+                ? 'apikey'
+                : normalizeManagedIdeAuthMode(authFile.auth_mode)),
+          email,
+          planType,
+          requiresOpenaiAuth:
+            snapshot.account?.requiresOpenaiAuth ??
+            snapshot.authStatus?.requiresOpenaiAuth ??
+            !account,
+          serviceTier: normalizeCodexServiceTier(
+            snapshot.config?.config?.service_tier ?? globalStateHints.defaultServiceTier,
+          ),
+          agentMode: normalizeCodexAgentMode(globalStateHints.agentMode),
           lastUpdatedAt,
-        });
-      },
-    );
+        },
+        liveAccountIdentityKey: getLiveCodexAccountIdentityKey({
+          authFile,
+          planType,
+          fallbackEmail: email,
+        }),
+        quota: rateLimits,
+        quotaByLimitId:
+          rateLimitsByLimitId && Object.keys(rateLimitsByLimitId).length > 0
+            ? rateLimitsByLimitId
+            : null,
+        authFilePath: runtime.authFilePath,
+        stateDbPath: runtime.stateDbPath,
+        storagePath: runtime.storagePath,
+        authLastUpdatedAt: runtime.authLastUpdatedAt,
+        extensionStateUpdatedAt: globalStateHints.updatedAt ?? runtime.extensionStateUpdatedAt,
+        lastUpdatedAt,
+      });
+    });
   } catch (error) {
     logger.error(`Failed to collect ${runtime.displayName} Codex status from app-server`, error);
     return createRuntimeStatusSnapshot(runtime, {

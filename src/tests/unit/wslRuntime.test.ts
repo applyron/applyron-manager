@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockExecSync, mockExistsSync, mockReadFileSync, mockGetWindowsUser, mockIsWsl } =
   vi.hoisted(() => ({
-  mockExecSync: vi.fn(),
-  mockExistsSync: vi.fn(),
-  mockReadFileSync: vi.fn(),
-  mockGetWindowsUser: vi.fn(),
-  mockIsWsl: vi.fn(),
+    mockExecSync: vi.fn(),
+    mockExistsSync: vi.fn(),
+    mockReadFileSync: vi.fn(),
+    mockGetWindowsUser: vi.fn(),
+    mockIsWsl: vi.fn(),
   }));
 
 vi.mock('child_process', () => ({
@@ -45,7 +45,9 @@ describe('wslRuntime', () => {
     mockExistsSync.mockReturnValue(false);
     mockExecSync.mockImplementation((command: string, args?: string[]) => {
       if (command === 'C:\\Windows\\System32\\wsl.exe' && args?.join(' ') === '-l -q') {
-        return Buffer.from('U\0b\0u\0n\0t\0u\0\r\0\n\0d\0o\0c\0k\0e\0r\0-\0d\0e\0s\0k\0t\0o\0p\0\r\0\n\0');
+        return Buffer.from(
+          'U\0b\0u\0n\0t\0u\0\r\0\n\0d\0o\0c\0k\0e\0r\0-\0d\0e\0s\0k\0t\0o\0p\0\r\0\n\0',
+        );
       }
 
       if (
@@ -154,7 +156,9 @@ describe('wslRuntime', () => {
   it('detects the VS Code-enabled distro when storage authority is unavailable', () => {
     mockExecSync.mockImplementation((command: string, args?: string[]) => {
       if (command === 'C:\\Windows\\System32\\wsl.exe' && args?.join(' ') === '-l -q') {
-        return Buffer.from('U\0b\0u\0n\0t\0u\0\r\0\n\0d\0o\0c\0k\0e\0r\0-\0d\0e\0s\0k\0t\0o\0p\0\r\0\n\0');
+        return Buffer.from(
+          'U\0b\0u\0n\0t\0u\0\r\0\n\0d\0o\0c\0k\0e\0r\0-\0d\0e\0s\0k\0t\0o\0p\0\r\0\n\0',
+        );
       }
 
       if (
@@ -166,16 +170,16 @@ describe('wslRuntime', () => {
 
       if (
         command === 'C:\\Windows\\System32\\wsl.exe' &&
-        args?.join('\0') ===
-          ['-d', 'docker-desktop', 'sh', '-lc', 'printf "%s" "$HOME"'].join('\0')
+        args?.join('\0') === ['-d', 'docker-desktop', 'sh', '-lc', 'printf "%s" "$HOME"'].join('\0')
       ) {
         return Buffer.from('/home/docker');
       }
 
       return Buffer.from('');
     });
-    mockExistsSync.mockImplementation((filePath: string) =>
-      filePath === '\\\\wsl$\\Ubuntu\\home\\ahmet\\.vscode-server\\extensions',
+    mockExistsSync.mockImplementation(
+      (filePath: string) =>
+        filePath === '\\\\wsl$\\Ubuntu\\home\\ahmet\\.vscode-server\\extensions',
     );
 
     const runtimeHome = resolveWslRuntimeHome(null);

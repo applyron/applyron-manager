@@ -74,9 +74,8 @@ describe('vscodeCodexAdapter/runtimeEnvironment', () => {
   });
 
   it('falls back to Windows Local when multiple runtimes are available and nothing is detected', async () => {
-    const { resolveCodexRuntimeSelection } = await import(
-      '../../managedIde/vscodeCodexAdapter/runtimeEnvironment'
-    );
+    const { resolveCodexRuntimeSelection } =
+      await import('../../managedIde/vscodeCodexAdapter/runtimeEnvironment');
 
     const selection = resolveCodexRuntimeSelection([
       createRuntime('windows-local'),
@@ -89,9 +88,8 @@ describe('vscodeCodexAdapter/runtimeEnvironment', () => {
 
   it('still prefers the detected WSL runtime when the active VS Code window is remote', async () => {
     mockGetActiveVsCodeWindowRuntimeId.mockReturnValue('wsl-remote');
-    const { resolveCodexRuntimeSelection } = await import(
-      '../../managedIde/vscodeCodexAdapter/runtimeEnvironment'
-    );
+    const { resolveCodexRuntimeSelection } =
+      await import('../../managedIde/vscodeCodexAdapter/runtimeEnvironment');
 
     const selection = resolveCodexRuntimeSelection([
       createRuntime('windows-local'),

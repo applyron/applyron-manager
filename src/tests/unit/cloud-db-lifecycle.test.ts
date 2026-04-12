@@ -237,7 +237,14 @@ describe('CloudAccountRepo lifecycle', () => {
     mockPrepare.mockImplementation((sql: string) => {
       if (sql.includes('SELECT version FROM schema_migrations')) {
         return {
-          all: () => [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }, { version: 6 }],
+          all: () => [
+            { version: 1 },
+            { version: 2 },
+            { version: 3 },
+            { version: 4 },
+            { version: 5 },
+            { version: 6 },
+          ],
         };
       }
 

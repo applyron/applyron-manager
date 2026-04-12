@@ -75,7 +75,7 @@ function isVsCodeMainProcess(name: string, cmd: string): boolean {
       return true;
     }
 
-    return /(?:^|["\s\\\/])code(?:\.exe)?(?:"|\s|$)/.test(normalizedCmd);
+    return /(?:^|["\s\\/])code(?:\.exe)?(?:"|\s|$)/.test(normalizedCmd);
   }
 
   if (process.platform === 'darwin') {
@@ -101,7 +101,10 @@ function hasVisibleVsCodeWindowOnWindows(): boolean | null {
     );
     return output.trim().length > 0;
   } catch (error) {
-    logger.warn('Failed to detect visible VS Code windows on Windows; falling back to process scan', error);
+    logger.warn(
+      'Failed to detect visible VS Code windows on Windows; falling back to process scan',
+      error,
+    );
     return null;
   }
 }

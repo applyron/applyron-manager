@@ -1,7 +1,4 @@
-import type {
-  CodexRuntimeId,
-  ManagedIdeInstallationStatus,
-} from '../types';
+import type { CodexRuntimeId, ManagedIdeInstallationStatus } from '../types';
 
 export interface CodexGlobalStateHints {
   codexCloudAccess: string | null;

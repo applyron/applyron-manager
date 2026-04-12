@@ -16,7 +16,10 @@ export function runWithCodexSwitchLock<T>(action: () => Promise<T>): Promise<T> 
   }
 
   const result = codexSwitchQueue.catch(() => undefined).then(runAction);
-  codexSwitchQueue = result.then(() => undefined, () => undefined);
+  codexSwitchQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
   return result;
 }
 

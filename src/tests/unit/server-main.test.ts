@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  bootstrapNestServer,
-  isAllowedLoopbackOrigin,
-  stopNestServer,
-} from '../../server/main';
+import { bootstrapNestServer, isAllowedLoopbackOrigin, stopNestServer } from '../../server/main';
 
 const mockEnableCors = vi.fn();
 const mockListen = vi.fn(async () => undefined);

@@ -105,7 +105,10 @@ function markCodexGlobalStateLocked(
   error: unknown,
 ): void {
   codexGlobalStateLockUntilByPath.set(dbPath, Date.now() + CODEX_GLOBAL_STATE_LOCK_BACKOFF_MS);
-  logger.warn(`VS Code Codex global state ${operation} skipped because state.vscdb is locked`, error);
+  logger.warn(
+    `VS Code Codex global state ${operation} skipped because state.vscdb is locked`,
+    error,
+  );
 }
 
 export function readCodexGlobalStateSnapshot(dbPath: string | null): CodexGlobalStateSnapshot {

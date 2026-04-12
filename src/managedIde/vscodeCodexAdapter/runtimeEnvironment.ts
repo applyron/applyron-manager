@@ -17,9 +17,17 @@ import {
 } from '../../utils/wslRuntime';
 import { getWindowsUser } from '../../utils/platformPaths';
 import { logger } from '../../utils/logger';
-import { OPENAI_EXTENSION_ID, WINDOWS_LOCAL_RUNTIME_LABEL, WSL_REMOTE_RUNTIME_LABEL } from './constants';
+import {
+  OPENAI_EXTENSION_ID,
+  WINDOWS_LOCAL_RUNTIME_LABEL,
+  WSL_REMOTE_RUNTIME_LABEL,
+} from './constants';
 import type { CodexResolvedRuntimeSelection, CodexRuntimeEnvironment } from './types';
-import type { CodexRuntimeId, ManagedIdeAvailabilityReason, ManagedIdeInstallationStatus } from '../types';
+import type {
+  CodexRuntimeId,
+  ManagedIdeAvailabilityReason,
+  ManagedIdeInstallationStatus,
+} from '../types';
 
 function compareVersionParts(left: string, right: string): number {
   const leftParts = left.split(/[.-]/g).map((part) => Number.parseInt(part, 10) || 0);
@@ -369,13 +377,9 @@ function normalizeExecOutput(output: Buffer | string): string {
 }
 
 export function runWslShellCommand(distroName: string, command: string): string {
-  const output = execFileSync(
-    getWslExecutableCommand(),
-    ['-d', distroName, 'sh', '-lc', command],
-    {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    },
-  );
+  const output = execFileSync(getWslExecutableCommand(), ['-d', distroName, 'sh', '-lc', command], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
   return normalizeExecOutput(output);
 }
 

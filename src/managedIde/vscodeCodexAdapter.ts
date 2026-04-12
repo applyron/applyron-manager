@@ -22,10 +22,7 @@ import {
   writeCachedStatus,
 } from './vscodeCodexAdapter/status';
 import { readCodexGlobalStateSnapshot } from './vscodeCodexAdapter/globalStateDb';
-import {
-  createRuntimeSelection,
-  getRuntimeById,
-} from './vscodeCodexAdapter/runtimeEnvironment';
+import { createRuntimeSelection } from './vscodeCodexAdapter/runtimeEnvironment';
 import {
   activateAccount as activateStoredAccount,
   ensureDeferredRuntimeApplyWatcher,
@@ -84,7 +81,8 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
   private ensureDeferredRuntimeApplyWatcher(): void {
     ensureDeferredRuntimeApplyWatcher({
       state: this.runtimeApplyState,
-      flushDeferredRuntimeApplyIfPossible: (options) => this.flushDeferredRuntimeApplyIfPossible(options),
+      flushDeferredRuntimeApplyIfPossible: (options) =>
+        this.flushDeferredRuntimeApplyIfPossible(options),
     });
   }
 
@@ -247,7 +245,8 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
     }
 
     const liveAuthRuntimeResult = runtimeResults.find(
-      (result) => result.runtime.id === status.activeRuntimeId && result.authFile?.tokens?.account_id,
+      (result) =>
+        result.runtime.id === status.activeRuntimeId && result.authFile?.tokens?.account_id,
     );
     if (liveAuthRuntimeResult?.authFile?.tokens?.account_id) {
       try {
@@ -422,7 +421,8 @@ export class VscodeCodexAdapter implements ManagedIdeAdapter {
 
   async openIde(): Promise<void> {
     await openManagedIde({
-      flushDeferredRuntimeApplyIfPossible: (options) => this.flushDeferredRuntimeApplyIfPossible(options),
+      flushDeferredRuntimeApplyIfPossible: (options) =>
+        this.flushDeferredRuntimeApplyIfPossible(options),
     });
   }
 

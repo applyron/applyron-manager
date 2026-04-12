@@ -2,9 +2,7 @@ import { isCloudStorageUnavailableError } from '../../ipc/database/cloudHandler'
 import { logger } from '../../utils/logger';
 import { openExternalWithPolicy } from '../../utils/externalNavigation';
 import { CodexAccountStore } from '../codexAccountStore';
-import {
-  getCodexPlanTypeHint,
-} from '../codexAuth';
+import { getCodexPlanTypeHint } from '../codexAuth';
 import { getCodexIdentityKey, isCodexPersonalWorkspace, isCodexTeamPlan } from '../codexIdentity';
 import { ensureFreshCodexLoginUrl } from '../codexLoginUrl';
 import {
@@ -483,7 +481,9 @@ export async function refreshAccount(input: {
   }
 }
 
-export async function refreshAllAccounts(runtime: CodexRuntimeEnvironment): Promise<CodexAccountRecord[]> {
+export async function refreshAllAccounts(
+  runtime: CodexRuntimeEnvironment,
+): Promise<CodexAccountRecord[]> {
   let accounts: CodexAccountRecord[];
   try {
     accounts = await CodexAccountStore.listAccounts();

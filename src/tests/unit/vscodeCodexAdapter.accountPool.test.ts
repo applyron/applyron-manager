@@ -91,9 +91,8 @@ describe('vscodeCodexAdapter/accountPool', () => {
     });
     mockGetCodexChromeWorkspaceLabel.mockReturnValue('Applyron Team');
 
-    const { getResolvedCodexWorkspace } = await import(
-      '../../managedIde/vscodeCodexAdapter/accountPool'
-    );
+    const { getResolvedCodexWorkspace } =
+      await import('../../managedIde/vscodeCodexAdapter/accountPool');
 
     const workspace = getResolvedCodexWorkspace(
       {
@@ -116,9 +115,8 @@ describe('vscodeCodexAdapter/accountPool', () => {
   });
 
   it('builds a re-login snapshot while preserving known account metadata', async () => {
-    const { createReloginRequiredSnapshot } = await import(
-      '../../managedIde/vscodeCodexAdapter/accountPool'
-    );
+    const { createReloginRequiredSnapshot } =
+      await import('../../managedIde/vscodeCodexAdapter/accountPool');
 
     const snapshot = createReloginRequiredSnapshot({
       id: 'acct-1',

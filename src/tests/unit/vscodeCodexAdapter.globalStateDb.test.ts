@@ -98,9 +98,8 @@ describe('vscodeCodexAdapter/globalStateDb', () => {
       }),
     });
 
-    const { readCodexGlobalStateSnapshot } = await import(
-      '../../managedIde/vscodeCodexAdapter/globalStateDb'
-    );
+    const { readCodexGlobalStateSnapshot } =
+      await import('../../managedIde/vscodeCodexAdapter/globalStateDb');
     const snapshot = readCodexGlobalStateSnapshot('C:/state.vscdb');
 
     expect(snapshot.codexCloudAccess).toBe('enabled_needs_setup');
@@ -114,9 +113,8 @@ describe('vscodeCodexAdapter/globalStateDb', () => {
       throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
     });
 
-    const { readCodexGlobalStateSnapshot } = await import(
-      '../../managedIde/vscodeCodexAdapter/globalStateDb'
-    );
+    const { readCodexGlobalStateSnapshot } =
+      await import('../../managedIde/vscodeCodexAdapter/globalStateDb');
 
     const first = readCodexGlobalStateSnapshot('C:/state.vscdb');
     const second = readCodexGlobalStateSnapshot('C:/state.vscdb');

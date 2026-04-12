@@ -39,10 +39,7 @@ import {
   sortCodexAccounts,
 } from '@/managedIde/codexAccounts';
 import { getCodexAccountDisplayIdentity, getCodexWorkspaceLabel } from '@/managedIde/codexIdentity';
-import type {
-  CodexAccountRecord,
-  CodexRuntimeId,
-} from '@/managedIde/types';
+import type { CodexAccountRecord, CodexRuntimeId } from '@/managedIde/types';
 import { getLocalizedErrorMessage } from '@/utils/errorMessages';
 import { GridLayout, normalizeGridLayout } from '@/types/config';
 import { getHudTone } from '@/utils/hudTone';
@@ -392,14 +389,14 @@ export function CodexAccountPanel() {
   const { toast } = useToast();
   const { config, saveConfig, isSaving } = useAppConfig();
   const refreshShortcutLabel = getAppShortcutLabel('refreshAccounts', isMacLikePlatform());
-  const [statusRefetchInterval, setStatusRefetchInterval] = useState<number | false>(
-    CODEX_STATUS_REFETCH_INTERVAL_MS,
-  );
 
   const statusQuery = useManagedIdeStatus('vscode-codex', {
     enabled: true,
     refresh: false,
-    refetchInterval: statusRefetchInterval,
+    refetchInterval: (query) =>
+      query.state.data?.pendingRuntimeApply
+        ? CODEX_STATUS_PENDING_REFETCH_INTERVAL_MS
+        : CODEX_STATUS_REFETCH_INTERVAL_MS,
   });
   const accountsQuery = useCodexAccounts();
   const addMutation = useAddCodexAccount();
@@ -464,14 +461,6 @@ export function CodexAccountPanel() {
 
     void accountsQuery.refetch();
   }, [accountsQuery, statusQuery.data?.lastUpdatedAt, statusQuery.data?.session.state]);
-
-  useEffect(() => {
-    setStatusRefetchInterval(
-      pendingRuntimeApply
-        ? CODEX_STATUS_PENDING_REFETCH_INTERVAL_MS
-        : CODEX_STATUS_REFETCH_INTERVAL_MS,
-    );
-  }, [pendingRuntimeApply]);
 
   const handleRefreshAll = useCallback(() => {
     refreshAllMutation.mutate(undefined, {
@@ -778,7 +767,10 @@ export function CodexAccountPanel() {
         }}
       >
         <div className="overflow-x-auto">
-          <div className="flex w-max min-w-full items-center gap-2.5" style={{ scrollbarWidth: 'thin' }}>
+          <div
+            className="flex w-max min-w-full items-center gap-2.5"
+            style={{ scrollbarWidth: 'thin' }}
+          >
             <div
               className="flex h-11 shrink-0 items-center gap-3 rounded-xl border px-3.5"
               style={{ background: 'var(--hud-panel-alt)', borderColor: 'var(--hud-border-soft)' }}
@@ -793,7 +785,7 @@ export function CodexAccountPanel() {
                     fill: config?.codex_auto_switch_enabled ? getHudTone('warning').solid : 'none',
                   }}
                 />
-                <span className="text-foreground whitespace-nowrap text-sm font-semibold">
+                <span className="text-foreground text-sm font-semibold whitespace-nowrap">
                   {t('cloud.autoSwitch')}
                 </span>
               </div>
@@ -819,7 +811,7 @@ export function CodexAccountPanel() {
                 <span className="text-[10px] font-bold tracking-[0.2em] text-[var(--hud-text-subtle)] uppercase">
                   {t('managedIde.labels.activeRuntime')}
                 </span>
-                <span className="text-foreground whitespace-nowrap font-semibold">
+                <span className="text-foreground font-semibold whitespace-nowrap">
                   {activeRuntimeLabel}
                 </span>
               </div>
@@ -902,7 +894,7 @@ export function CodexAccountPanel() {
             <Button
               onClick={handleAddAccount}
               disabled={addMutation.isPending || !canAddAccount}
-              className={`${PRIMARY_ADD_BUTTON_CLASS} h-11 shrink-0 whitespace-nowrap px-5`}
+              className={`${PRIMARY_ADD_BUTTON_CLASS} h-11 shrink-0 px-5 whitespace-nowrap`}
               style={PRIMARY_ADD_BUTTON_STYLE}
             >
               {addMutation.isPending ? (

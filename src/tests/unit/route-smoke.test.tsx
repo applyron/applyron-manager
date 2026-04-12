@@ -10,6 +10,7 @@ const mockUseAppConfig = vi.fn();
 const mockUseAppUpdateStatus = vi.fn();
 const mockUseCloudAccounts = vi.fn();
 const mockUseCodexAccounts = vi.fn();
+const mockUseManagedIdeStatus = vi.fn();
 const mockUseManagedIdeTargets = vi.fn();
 const mockToast = vi.fn();
 
@@ -57,6 +58,7 @@ vi.mock('@/hooks/useCloudAccounts', () => ({
 
 vi.mock('@/hooks/useManagedIde', () => ({
   useCodexAccounts: () => mockUseCodexAccounts(),
+  useManagedIdeStatus: (...args: unknown[]) => mockUseManagedIdeStatus(...args),
   useManagedIdeTargets: () => mockUseManagedIdeTargets(),
 }));
 
@@ -324,6 +326,15 @@ describe('route smoke coverage', () => {
 
     mockUseCodexAccounts.mockReturnValue({
       data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
+
+    mockUseManagedIdeStatus.mockReturnValue({
+      data: {
+        liveAccountIdentityKey: null,
+      },
       isLoading: false,
       isError: false,
       error: null,

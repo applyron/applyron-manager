@@ -24,6 +24,15 @@ export const MANAGED_IDE_QUERY_KEYS = {
   codexAccounts: ['managedIde', 'codexAccounts'] as const,
 };
 
+type ManagedIdeStatusRefetchInterval =
+  | number
+  | false
+  | ((query: {
+      state: {
+        data: Awaited<ReturnType<typeof getManagedIdeCurrentStatus>> | undefined;
+      };
+    }) => number | false | undefined);
+
 export function useManagedIdeTargets() {
   return useQuery({
     queryKey: MANAGED_IDE_QUERY_KEYS.targets,
@@ -37,7 +46,7 @@ export function useManagedIdeStatus(
   options?: {
     enabled?: boolean;
     refresh?: boolean;
-    refetchInterval?: number | false;
+    refetchInterval?: ManagedIdeStatusRefetchInterval;
   },
 ) {
   return useQuery({

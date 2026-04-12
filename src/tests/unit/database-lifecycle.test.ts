@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockExistsSync,
-  mockMkdirSync,
-  mockOpenDrizzleConnection,
-} = vi.hoisted(() => ({
+const { mockExistsSync, mockMkdirSync, mockOpenDrizzleConnection } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockMkdirSync: vi.fn(),
   mockOpenDrizzleConnection: vi.fn(),
@@ -120,9 +116,8 @@ describe('database handler lifecycle', () => {
   });
 
   it('reuses the shared owner connection for hot-path reads and closes it on shutdown', async () => {
-    const { backupAccount, getCurrentAccountInfo, initDatabase, shutdownDatabase } = await import(
-      '../../ipc/database/handler'
-    );
+    const { backupAccount, getCurrentAccountInfo, initDatabase, shutdownDatabase } =
+      await import('../../ipc/database/handler');
 
     initDatabase();
     const info = getCurrentAccountInfo();

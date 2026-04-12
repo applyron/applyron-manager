@@ -201,7 +201,9 @@ describe('codexAccounts', () => {
       isActive: false,
     });
 
-    expect(resolveLiveCodexAccount([staleActive, liveAccount], 'acc-live')?.id).toBe('live-account');
+    expect(resolveLiveCodexAccount([staleActive, liveAccount], 'acc-live')?.id).toBe(
+      'live-account',
+    );
     expect(reconcileCodexAccountsWithLiveIdentity([staleActive, liveAccount], 'acc-live')).toEqual([
       { ...staleActive, isActive: false },
       { ...liveAccount, isActive: true },

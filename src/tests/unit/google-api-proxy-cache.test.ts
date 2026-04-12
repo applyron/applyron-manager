@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockGetCachedConfigOrLoad,
-  mockProxyAgent,
-  mockLoggerWarn,
-} = vi.hoisted(() => ({
+const { mockGetCachedConfigOrLoad, mockProxyAgent, mockLoggerWarn } = vi.hoisted(() => ({
   mockGetCachedConfigOrLoad: vi.fn(),
   mockProxyAgent: vi.fn(),
   mockLoggerWarn: vi.fn(),

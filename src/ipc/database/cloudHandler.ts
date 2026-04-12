@@ -1194,7 +1194,9 @@ export class CloudAccountRepo {
 
     const boundProfile = parseDeviceProfileColumn(row.deviceProfileJson);
     if (boundProfile && areDeviceProfilesEqual(boundProfile, profile)) {
-      logger.info(`Skipping duplicate device profile binding for account ${id} (bound profile match)`);
+      logger.info(
+        `Skipping duplicate device profile binding for account ${id} (bound profile match)`,
+      );
       return;
     }
 
@@ -1207,8 +1209,14 @@ export class CloudAccountRepo {
       );
       return;
     }
-    if (!currentVersion && latestVersion && areDeviceProfilesEqual(latestVersion.profile, profile)) {
-      logger.info(`Skipping duplicate device profile binding for account ${id} (history latest match)`);
+    if (
+      !currentVersion &&
+      latestVersion &&
+      areDeviceProfilesEqual(latestVersion.profile, profile)
+    ) {
+      logger.info(
+        `Skipping duplicate device profile binding for account ${id} (history latest match)`,
+      );
       return;
     }
 

@@ -283,14 +283,14 @@ const defaultAuthPath = path.join(os.homedir(), '.codex', 'auth.json');
 const wslAccessibleHome = '\\\\wsl$\\Ubuntu\\home\\ahmet';
 const wslLinuxHome = '/home/ahmet';
 const wslAuthPath = path.join(wslAccessibleHome, '.codex', 'auth.json');
-const temporaryWslLinuxCodexHome = '/home/ahmet/.applyron-manager/tmp/applyron-codex-login-123';
+const _temporaryWslLinuxCodexHome = '/home/ahmet/.applyron-manager/tmp/applyron-codex-login-123';
 const temporaryWslAccessibleCodexHome = path.join(
   wslAccessibleHome,
   '.applyron-manager',
   'tmp',
   'applyron-codex-login-123',
 );
-const temporaryWslCodexAuthPath = `${temporaryWslAccessibleCodexHome}\\auth.json`;
+const _temporaryWslCodexAuthPath = `${temporaryWslAccessibleCodexHome}\\auth.json`;
 const _wslStateDbPath = path.join(
   wslAccessibleHome,
   '.vscode-server',
@@ -1300,14 +1300,8 @@ describe('VscodeCodexAdapter', () => {
 
       await vi.advanceTimersByTimeAsync(15_000);
 
-      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
-        createAuthFile('acc-2'),
-        defaultAuthPath,
-      );
-      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(
-        createAuthFile('acc-1'),
-        defaultAuthPath,
-      );
+      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(createAuthFile('acc-2'), defaultAuthPath);
+      expect(mockWriteCodexAuthFile).toHaveBeenCalledWith(createAuthFile('acc-1'), defaultAuthPath);
       expect(mockReadCodexAuthFile(defaultAuthPath)).toEqual(createAuthFile('acc-1'));
       expect(mockUpsertAccount).not.toHaveBeenCalled();
       expect(persistedConfig.codex_pending_runtime_apply).toEqual(
@@ -1348,7 +1342,9 @@ describe('VscodeCodexAdapter', () => {
       linuxHomePath: wslLinuxHome,
       accessibleHomePath: wslAccessibleHome,
     });
-    mockGetAccount.mockResolvedValue(createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }));
+    mockGetAccount.mockResolvedValue(
+      createAccountRecord({ id: 'codex-wsl', accountId: 'acc-wsl' }),
+    );
     mockReadStoredAuthFile.mockResolvedValue(createAuthFile('acc-wsl'));
     mockReadCodexAuthFile.mockImplementation((filePath?: string) => {
       if (filePath === wslAuthPath) {
@@ -1392,7 +1388,7 @@ describe('VscodeCodexAdapter', () => {
         'Ubuntu',
         'sh',
         '-lc',
-        expect.stringContaining("openai.chatgpt-.*/bin/linux-x86_64/codex app-server"),
+        expect.stringContaining('openai.chatgpt-.*/bin/linux-x86_64/codex app-server'),
       ],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -1430,7 +1426,7 @@ describe('VscodeCodexAdapter', () => {
         'Ubuntu',
         'sh',
         '-lc',
-        expect.stringContaining("\\.vscode-server/.*/out/bootstrap-fork --type=extensionHost"),
+        expect.stringContaining('\\.vscode-server/.*/out/bootstrap-fork --type=extensionHost'),
       ],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -1487,7 +1483,7 @@ describe('VscodeCodexAdapter', () => {
           'Ubuntu',
           'sh',
           '-lc',
-          expect.stringContaining("\\.vscode-server/.*/out/bootstrap-fork --type=extensionHost"),
+          expect.stringContaining('\\.vscode-server/.*/out/bootstrap-fork --type=extensionHost'),
         ],
         expect.objectContaining({
           stdio: ['ignore', 'pipe', 'ignore'],

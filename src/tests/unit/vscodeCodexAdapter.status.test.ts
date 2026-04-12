@@ -121,9 +121,8 @@ describe('vscodeCodexAdapter/status', () => {
     mockCollectSnapshot.mockRejectedValue(new Error('app-server down'));
     mockGetCodexPlanTypeHint.mockReturnValue('plus');
 
-    const { buildRuntimeStatusFromAuthFile } = await import(
-      '../../managedIde/vscodeCodexAdapter/status'
-    );
+    const { buildRuntimeStatusFromAuthFile } =
+      await import('../../managedIde/vscodeCodexAdapter/status');
 
     const status = await buildRuntimeStatusFromAuthFile({
       runtime: {

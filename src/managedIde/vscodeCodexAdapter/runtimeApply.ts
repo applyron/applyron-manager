@@ -5,7 +5,11 @@ import { logger } from '../../utils/logger';
 import { CodexAccountStore } from '../codexAccountStore';
 import { readCodexAuthFile, removeCodexAuthFile, writeCodexAuthFile } from '../codexAuth';
 import { CODEX_DEFERRED_RUNTIME_APPLY_POLL_MS } from './constants';
-import { clearCodexGlobalStateSnapshot, readCodexGlobalStateSnapshot, writeCodexGlobalStateSnapshot } from './globalStateDb';
+import {
+  clearCodexGlobalStateSnapshot,
+  readCodexGlobalStateSnapshot,
+  writeCodexGlobalStateSnapshot,
+} from './globalStateDb';
 import {
   markAccountHydrationLive,
   toCodexAccountStoreError,
@@ -24,7 +28,12 @@ import {
   isWindowsWslRemoteRuntime,
   resetWslRemoteVsCodeProcesses,
 } from './runtimeEnvironment';
-import type { DeferredRuntimeApplyStateBag, CodexRuntimeEnvironment, CodexResolvedRuntimeSelection, CodexLiveApplyResult } from './types';
+import type {
+  DeferredRuntimeApplyStateBag,
+  CodexRuntimeEnvironment,
+  CodexResolvedRuntimeSelection,
+  CodexLiveApplyResult,
+} from './types';
 import type {
   CodexAccountActivationResult,
   CodexAccountRecord,
@@ -83,7 +92,9 @@ export function stopDeferredRuntimeApplyWatcher(state: DeferredRuntimeApplyState
 
 export function ensureDeferredRuntimeApplyWatcher(input: {
   state: DeferredRuntimeApplyStateBag;
-  flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
+  flushDeferredRuntimeApplyIfPossible: (options?: {
+    assumeIdeStopped?: boolean;
+  }) => Promise<boolean>;
 }): void {
   if (input.state.deferredRuntimeApplyTimer || !getDeferredRuntimeApply(input.state)) {
     return;
@@ -171,10 +182,7 @@ function restoreRuntimeGlobalStateSnapshot(target: RuntimeApplyTargetSnapshot): 
 function rollbackRuntimeApply(targets: RuntimeApplyTargetSnapshot[]): void {
   for (const target of [...targets].reverse()) {
     try {
-      restoreRuntimeAuthFile(
-        target.runtime,
-        target.rollbackAuthFile ?? target.previousAuthFile,
-      );
+      restoreRuntimeAuthFile(target.runtime, target.rollbackAuthFile ?? target.previousAuthFile);
     } catch (error) {
       logger.warn(
         `Failed to restore the previous Codex auth file for ${target.runtime.id} during rollback`,
@@ -306,12 +314,11 @@ export async function flushDeferredRuntimeApplyIfPossible(input: {
     const isProcessRunning = input.options?.assumeIdeStopped
       ? false
       : await isManagedIdeProcessRunning('vscode-codex');
-    const activeAccount =
-      !isProcessRunning ? await CodexAccountStore.getActiveAccount().catch(() => null) : null;
+    const activeAccount = !isProcessRunning
+      ? await CodexAccountStore.getActiveAccount().catch(() => null)
+      : null;
     const rollbackAuthFile =
-      !isProcessRunning &&
-      activeAccount &&
-      activeAccount.id !== deferredRuntimeApply.recordId
+      !isProcessRunning && activeAccount && activeAccount.id !== deferredRuntimeApply.recordId
         ? await CodexAccountStore.readAuthFile(activeAccount.id).catch(() => null)
         : null;
     const didApply = applyAuthToRuntimeTargets({
@@ -395,13 +402,15 @@ export async function applyAccountToRuntime(input: {
   id: string;
   selection: CodexResolvedRuntimeSelection;
   ensureDeferredRuntimeApplyWatcher: () => void;
-  flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
+  flushDeferredRuntimeApplyIfPossible: (options?: {
+    assumeIdeStopped?: boolean;
+  }) => Promise<boolean>;
 }): Promise<CodexLiveApplyResult> {
   const primaryRuntime = getPrimaryCodexRuntime(input.selection);
-  const runtimeId =
-    getRuntimeById(input.selection, input.selection.activeRuntimeId)?.installation.available
-      ? (input.selection.activeRuntimeId as CodexRuntimeId)
-      : primaryRuntime?.id ?? null;
+  const runtimeId = getRuntimeById(input.selection, input.selection.activeRuntimeId)?.installation
+    .available
+    ? (input.selection.activeRuntimeId as CodexRuntimeId)
+    : (primaryRuntime?.id ?? null);
   if (!primaryRuntime || !runtimeId) {
     throw new Error('CODEX_IDE_UNAVAILABLE');
   }
@@ -472,7 +481,9 @@ export async function activateAccount(input: {
   state: DeferredRuntimeApplyStateBag;
   id: string;
   resolveRuntimeSelection: () => CodexResolvedRuntimeSelection;
-  flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
+  flushDeferredRuntimeApplyIfPossible: (options?: {
+    assumeIdeStopped?: boolean;
+  }) => Promise<boolean>;
   ensureDeferredRuntimeApplyWatcher: () => void;
   getCurrentStatus: (options?: { refresh?: boolean }) => Promise<ManagedIdeCurrentStatus>;
 }): Promise<CodexAccountActivationResult> {
@@ -530,7 +541,9 @@ export async function restoreImportedAccount(input: {
   state: DeferredRuntimeApplyStateBag;
   id: string | null;
   resolveRuntimeSelection: () => CodexResolvedRuntimeSelection;
-  flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
+  flushDeferredRuntimeApplyIfPossible: (options?: {
+    assumeIdeStopped?: boolean;
+  }) => Promise<boolean>;
   ensureDeferredRuntimeApplyWatcher: () => void;
 }): Promise<CodexImportRestoreResult> {
   if (!input.id) {
@@ -594,10 +607,7 @@ export async function syncRuntimeState(
 ): Promise<CodexRuntimeSyncResult> {
   const sourceRuntime = getRuntimeById(selection, 'windows-local');
   const targetRuntime = getRuntimeById(selection, 'wsl-remote');
-  if (
-    !sourceRuntime?.installation.available ||
-    !targetRuntime?.installation.available
-  ) {
+  if (!sourceRuntime?.installation.available || !targetRuntime?.installation.available) {
     throw new Error('CODEX_RUNTIME_SYNC_UNAVAILABLE');
   }
 
@@ -665,7 +675,9 @@ export async function syncRuntimeState(
 }
 
 export async function openIde(input: {
-  flushDeferredRuntimeApplyIfPossible: (options?: { assumeIdeStopped?: boolean }) => Promise<boolean>;
+  flushDeferredRuntimeApplyIfPossible: (options?: {
+    assumeIdeStopped?: boolean;
+  }) => Promise<boolean>;
 }): Promise<void> {
   await input.flushDeferredRuntimeApplyIfPossible({ assumeIdeStopped: true });
   await startManagedIde('vscode-codex', false);

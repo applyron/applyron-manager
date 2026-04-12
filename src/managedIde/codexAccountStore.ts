@@ -2,10 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { asc, eq, or } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  getCloudDbConnection,
-  isCloudStorageUnavailableError,
-} from '../ipc/database/cloudHandler';
+import { getCloudDbConnection, isCloudStorageUnavailableError } from '../ipc/database/cloudHandler';
 import { codexAccounts } from '../ipc/database/schema';
 import { decrypt, encrypt } from '../utils/security';
 import { getCloudAccountsDbPath } from '../utils/paths';
@@ -70,7 +67,10 @@ function runSerializedCodexStoreWrite<T>(action: () => Promise<T>): Promise<T> {
   }
 
   const result = codexStoreWriteQueue.catch(() => undefined).then(runAction);
-  codexStoreWriteQueue = result.then(() => undefined, () => undefined);
+  codexStoreWriteQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
   return result;
 }
 
@@ -518,13 +518,11 @@ export class CodexAccountStore {
               .all(),
           );
           const existingRow =
-            (input.existingId
-              ? existingRows.find((row) => row.id === input.existingId)
-              : null) ?? getExistingRowByIdentityKey(existingRows, identityKey);
+            (input.existingId ? existingRows.find((row) => row.id === input.existingId) : null) ??
+            getExistingRowByIdentityKey(existingRows, identityKey);
           const id = existingRow?.id ?? input.existingId ?? uuidv4();
           const sortOrder = existingRow?.sortOrder ?? (await getNextSortOrder());
-          const hydrationState =
-            input.hydrationState ?? existingRow?.hydrationState ?? 'live';
+          const hydrationState = input.hydrationState ?? existingRow?.hydrationState ?? 'live';
           const payload: PersistedCodexAccountRow = {
             id,
             email: input.email,
@@ -539,7 +537,7 @@ export class CodexAccountStore {
             identityKey,
             encryptedAuthJson,
             snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
-            isActive: input.makeActive ? 1 : existingRow?.isActive ?? 0,
+            isActive: input.makeActive ? 1 : (existingRow?.isActive ?? 0),
             sortOrder,
             createdAt: existingRow?.createdAt ?? now,
             updatedAt: now,
@@ -587,8 +585,7 @@ export class CodexAccountStore {
             rows.find((row) => row.id === input.existingId) ??
             getExistingRowByIdentityKey(rows, identityKey);
           const id = existingRow?.id ?? input.existingId ?? uuidv4();
-          const hydrationState =
-            input.hydrationState ?? existingRow?.hydrationState ?? 'live';
+          const hydrationState = input.hydrationState ?? existingRow?.hydrationState ?? 'live';
           const sortOrder = existingRow?.sortOrder ?? getNextSortOrderFromRows(rows);
 
           if (input.makeActive) {
@@ -612,7 +609,7 @@ export class CodexAccountStore {
             identityKey,
             encryptedAuthJson,
             snapshotJson: input.snapshot ? JSON.stringify(input.snapshot) : null,
-            isActive: input.makeActive ? 1 : existingRow?.isActive ?? 0,
+            isActive: input.makeActive ? 1 : (existingRow?.isActive ?? 0),
             sortOrder,
             createdAt: existingRow?.createdAt ?? now,
             updatedAt: now,
